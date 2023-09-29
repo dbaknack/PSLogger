@@ -2,14 +2,13 @@
     "Headings":[
         "LogIDs",
         "DateTime",
-        "Message",
-        "HostName"
+        "HostName",
+        "Message"
     ],
     "SeedValue":[0,1],
     "DateTimeFormat":"yyyy-MM-dd HH:mm:ss",
     "Delimeter":",",
     "OutputColor":"red",
-    "LogFilePath" :"./Logs/PSLogging.logs",
+    "LogFilePath" :"./Test/Logs/PSLogging.logs",
     "EnableLogging":"true"
-   
 }

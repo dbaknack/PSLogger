@@ -1,6 +1,5 @@
-Import-Module "./ModuleUtilities/PSLoggingFunctions.psm1"
-class PSLogging{
-    $ConfigFilePath = [string]"./ModuleConfig/PSLoggingConfig.json"
+class PSLogger{
+    $ConfigFilePath = [string]"./Private/Configuration.json"
     $Configuration = @{
         LoggingFormat = @{
             Headings        = [array]$this.GetConfiguration('Headings')
@@ -16,6 +15,7 @@ class PSLogging{
             OutputColor = $this.GetConfiguration('OutputColor')
         }
     }
+
     [psobject]UtilityTestFilePath([string]$FilePath){
         if(-not(Test-Path $FilePath)){
             return $false
@@ -23,6 +23,7 @@ class PSLogging{
        Write-Verbose -Message 'passed test' -Verbose
         return $true
     }
+
     [void]UtilityReloadConfiguration([array]$Reload){
         $propertyTable = @{
             parentprops = [array]($this.Configuration.keys)
@@ -36,6 +37,7 @@ class PSLogging{
             }
         }
     }
+
     [psobject]GetConfiguration([string]$Property){
         $Message = "+-- {0} '{1}'" -f "Getting '$($Property)' set value from",$this.ConfigFilePath
         Write-Verbose $Message -Verbose
@@ -53,7 +55,8 @@ class PSLogging{
         $this.Configuration.ConsoleView
         return [string]$PropertyObject
     }
-    [void]Message([string]$LogEntry){
+
+    [psobject]Message([string]$LogEntry){
         $EnableLogging = $this.Configuration.Logs.EnableLogging
         $LogFilePath = $this.Configuration.Logs.LogFilePath
         if($EnableLogging -eq 'true'){
@@ -69,9 +72,11 @@ class PSLogging{
             HeadingsOffset = ($HeadingsString.split(' ')).count -1
             IndexList = $null
         }
+        
         foreach($index in (0..$HeadingsTable.HeadingsOffset)){
-           [array]$HeadingsTable.IndexList += "{$index}" 
+           [array]$HeadingsTable.IndexList += $index
         }
+        return $HeadingsTable
         $SeedVaule = $this.Configuration.LoggingFormat.SeedValue
         $SeedValueList = $SeedVaule.split(' ')
         $SeedProps = @{
@@ -101,9 +106,6 @@ class PSLogging{
         Add-Content -Path $LogFilePath -Value $tobelogged
     }
 }
-
-Function Import-UtilityPSLogging{
-    $PSLogging = [PSLogging]::new()
-    $PSLogging
-}
-Export-ModuleMember -Function @('Import-UtilityPSLogging','Update-PSLoggingConfig')
+$test= [PSLogger]::new()
+$test.Message("test").IndexList
+$test.Configuration.LoggingFormat
