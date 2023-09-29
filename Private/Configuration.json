@@ -1,14 +1,24 @@
 {
     "Headings":[
-        "LogIDs",
+        "UserName",
         "DateTime",
         "HostName",
         "Message"
     ],
-    "SeedValue":[0,1],
+    "EntryIdentity":[0,1],
+    "LogIdentity":[1,1],
     "DateTimeFormat":"yyyy-MM-dd HH:mm:ss",
     "Delimeter":",",
     "OutputColor":"red",
-    "LogFilePath" :"./Test/Logs/PSLogging.logs",
+    "CycleLogs":"true",
+    "Interval":{
+        "seconds":10
+    },
+    "Retention":{
+        "mostrecent": 10
+    },
+    "LogFilePath" :"./Test/Logs",
+    "LogFileName":"Test.logs",
+    "TrackedValuesFile":"./Private/TrackedValues.json",
     "EnableLogging":"true"
 }
