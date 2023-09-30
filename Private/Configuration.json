@@ -6,16 +6,16 @@
         "Message"
     ],
     "EntryIdentity":[0,1],
-    "LogIdentity":[1,1],
+    "LogIdentity":[0,1],
     "DateTimeFormat":"yyyy-MM-dd HH:mm:ss",
-    "Delimeter":",",
+    "Delimeter":"|",
     "OutputColor":"red",
     "CycleLogs":"true",
     "Interval":{
-        "seconds":10
+        "seconds":20
     },
     "Retention":{
-        "mostrecent": 10
+        "mostrecent": 3
     },
     "LogFilePath" :"./Test/Logs",
     "LogFileName":"Test.logs",

@@ -1,14 +1,35 @@
+$ErrorActionPreference = 'stop'
+Function EvaluateOS{
+    if($IsWindows){
+        $OS_PARAMETERS = @{
+            OS_HOST = $env:COMPUTERNAME
+            OS_USER = $env:USERDOMAIN
+        }
+    }
+    if($IsMacOS){
+        $OS_PARAMETERS = @{
+            OS_HOST = "MAC_OS"
+            OS_USER = "MAC_USER"
+        }
+    }
+    $OS_PARAMETERS
+}
 class PSLogger{
     $LogFormatTable = @{
         Properties = @(
             "Headings",
-            "Identity",
+            "EntryIdentity",
+            "LogIdentity",
             "DateTimeFormat",
             "Delimeter",
             "OutputColor",
+            "CycleLogs",
+            "Interval",
+            "Retention",
             "LogFilePath",
             "LastDelimeterPath",
             "LogFileName",
+            "TrackedValuesFile",
             "EnableLogging"
         )
         Headings = @(
@@ -24,82 +45,167 @@ class PSLogger{
 
     # first validate that the configurations looks like what we expect it to look like
     [psobject]ValidateConfiguration([hashtable]$fromSender){
+        Write-Verbose -Message "[ValidateConfiguration]::running configuration validation..." -Verbose
         $allowedPropertiesList = $this.LogFormatTable.Properties
+        $RESULTS_TABLE  =   @{
+            isSuccessfull   =   [bool]
+            details         =   [psobject]
+        }
         foreach($property in $fromSender.keys){
             if($allowedPropertiesList -notcontains $property){
-                Write-Verbose -Message "$property is now allowed" -Verbose
+                $RESULTS_TABLE.isSuccessfull = $false
+                $RESULTS_TABLE.details = "not all the properties in your configuration file are allowed"
             }else{
-                Write-Verbose -Message "$property is allowed" -Verbose
+                $RESULTS_TABLE.isSuccessfull = $true
             }
         }
-        return $true
+        return $RESULTS_TABLE
     }
-
+    
     # method to set the configuration
     [void]SetConfiguration([hashtable]$fromSender){
+        Write-Verbose -Message "[SetConfiguration]::setting the configuration from disk to the class parameter..." -Verbose
         $this.Configuration = $fromSender
     }
+
+    # method to set the tracked values
     [void]SetTrackedValues([hashtable]$fromSender){
+        Write-Verbose -Message "[SetConfiguration]::setting the tracked values from disk to the class parameter..." -Verbose
         $this.TrackedValues = $fromSender
     }
 
-    # the configuration file get read into memory here, validation will take place here
-    [void]LoadConfiguration(){
-       $preLoadedConfiguration = ((Get-Content $this.ConfigFilePath) | ConvertFrom-Json -AsHashtable)
-       $this.ValidateConfiguration($preLoadedConfiguration)
+    # the configuration file gets read into memory
+    [psobject]LoadConfiguration(){
+        Write-Verbose -Message "[LoadConfiguration]::reading configuration from disk..." -Verbose
+        $RESULTS_TABLE  =   @{
+            isSuccessfull   =   [bool]
+            details         =   [psobject]
+        }
+        $preLoadedConfiguration = ((Get-Content $this.ConfigFilePath) | ConvertFrom-Json -AsHashtable)
+        $RESULTS_TABLE = ($this.ValidateConfiguration($preLoadedConfiguration))
+       
+        if( -not ($RESULTS_TABLE.isSuccessfull)){
+            Write-Error -Message $RESULTS_TABLE.details -Category "InvalidData"
+        }
 
-       # the configuration is set if its valid
-       $this.SetConfiguration($preLoadedConfiguration)
+        # the configuration is set if its valid
+        $this.SetConfiguration($preLoadedConfiguration)
+        return $RESULTS_TABLE
     }
+
     [void]LoadTrackedValues(){
-        $trackedValuesFile = ($this.Configuration.TrackedValuesFile)
-        $preLoadedValues = ((Get-Content $trackedValuesFile) | ConvertFrom-Json -AsHashtable)
-        $this.SetTrackedValues($preLoadedValues)
+        Write-Verbose -Message "[LoadTrackedValues]::reading tracked values from disk..." -Verbose
+        $props = $this.GetConfiguration(@{Reload = $true})
+        
+        $preLoadedTrackedValues = (Get-Content $props.TrackedValuesFile) | ConvertFrom-Json -AsHashtable
+       
+        # the tracked is set
+        $this.SetTrackedValues($preLoadedTrackedValues)
     }
 
     # get the configuration, at this point its in memory, LoadConfiguration to get new changes
     [psobject]GetConfiguration([hashtable]$fromSender){
+        # if reload is true, the configuration is read from disk
         switch($fromSender.Reload){
             $true {
+                Write-Verbose -Message "[GetConfiguration]::loading configuration from disk..." -Verbose
                 $this.LoadConfiguration()
+            }
+            default {
+                Write-Verbose -Message "[GetConfiguration]::getting configuration from class parameter(s)..." -Verbose
             }
         }
         return $this.Configuration
     }
+
     [psobject]GetTrackedValues([hashtable]$fromSender){
         switch($fromSender.Reload){
             $true {
+                Write-Verbose -Message "[GetTrackedValues]::loading tracked values from disk..." -Verbose
                 $this.LoadTrackedValues()
+            }
+            default{
+                Write-Verbose -Message "[GetTrackedValues]::getting tracked values from class parameter(s)..." -Verbose
             }
         }
         return $this.TrackedValues
     }
 
-    [void]RetentionPolicy(){
+    [psobject]RetentionPolicy(){
         $props = $this.GetConfiguration(@{Reload = $true})
-       
-        $logFileList = (Get-ChildItem -Path  $props.LogFilePath -Filter "*$($props.LogFileName)") | Sort-Object -Property CreationTime
-        $retainloglist = $logFileList | Select-Object -First $props.Retention.mostrecent
-       (Compare-Object -ReferenceObject $retainloglist -DifferenceObject $logFileList).InputObject | 
-       Remove-Item 
+        $logFileList = (Get-ChildItem -Path  $props.LogFilePath -Filter "*$($props.LogFileName)") 
+
+        $retentionList = $logFileList | Sort-Object -Property  LastWriteTime -Descending | Select-Object -First ($props.Retention.mostrecent -1)
+        $canCreateNewFile = $true
+        $mostRecentLog =  ($this.GetCurrentLogFile()).mostRecentLog
+        write-host $mostRecentLog -f Blue
+        [string]$myInterval = $props.Interval.keys
+        [string]$myIntervalValue = $props.Interval.values
+
+        $DateTimeCommandString= ('(Get-Date).Add{0}(-{1})' -f ($myInterval),($myIntervalValue))
+        $scriptBlock = [scriptblock]::Create($DateTimeCommandString)
+        $DateTimeOffset = Invoke-Command -ScriptBlock $scriptBlock
+
+        # the second the most recent file is older than than $DateTimeOffset the policy is checked
+        if(($mostRecentLog.CreationTime) -lt $DateTimeOffset){
+            Write-Host "Most recent log has a creationg time of  $(($mostRecentLog.CreationTime).ToString('yyyy-MM-dd HH:mm:ss'))" -ForegroundColor red
+            Write-host "The datetime offset is $(($DateTimeOffset).ToString('yyyy-MM-dd HH:mm:ss'))" -ForegroundColor red
+            $logFileList | Select-Object -Property * | Where-Object {$retentionList.Name -notcontains $_.Name} | Remove-Item
+            
+       }else{
+            Write-Host "Most recent log has a creationg time of  $(($mostRecentLog.CreationTime).ToString('yyyy-MM-dd HH:mm:ss'))" -ForegroundColor Cyan
+            Write-host "The datetime offset is $(($DateTimeOffset).ToString('yyyy-MM-dd HH:mm:ss'))" -ForegroundColor Cyan
+            $canCreateNewFile = $false
+       }
+       return $canCreateNewFile
     }
-    [psobject]CreateLogFile(){
-        # recheck properties from disk when creating a log file
-        $this.RetentionPolicy()
+
+    [psobject]GetCurrentLogFile(){
+        # reloading configuration
         $props = $this.GetConfiguration(@{Reload = $true})
-        $timeInterval = $props.Interval.keys
-        $intervalValue = $props.Interval.values
+        $logFileList = (Get-ChildItem -Path  $props.LogFilePath -Filter "*$($props.LogFileName)")
+        if($null -eq $logFileList){
+            write-verbose -Message "[GetCurrentLogFile]:: there is no current log file in the given location" -Verbose
+            $mostRecentLog = @{
+                isNull = $true
+            }
+        }else{
+            $mostRecentLog = @{
+                isNull = $false
+                mostRecentLog = $logFileList | Sort-Object -Property  LastWriteTime -Descending | Select-Object -First 1
+            }
+        }
+        return $mostRecentLog
+    }
+
+    [psobject]CreateLogFile(){
+        $props = $this.GetConfiguration(@{Reload = $true})
+        $reference = $this.GetTrackedValues(@{Reload = $true}) 
+        $canCreateNewFile = [bool]
+        # if there is no log file(s), we can reset the logfileid
+        if(($this.GetCurrentLogFile()).isNull){
+            Write-Verbose -Message "[GetConfiguration]:: reseeding the tracked value properties" -Verbose
+            $reference = $this.GetTrackedValues(@{Reload = $true})    
+            $reference.LogFileID = $props.LogIdentity[0]
+            $reference.LastDelimeter = $props.Delimeter
+            $reset_TrackedValues = $reference | ConvertTo-Json
+            Set-Content -Path $props.TrackedValuesFile -Value $reset_TrackedValues
+        }else{
+            Write-Verbose -Message "[GetConfiguration]:: using the current tracked value properties" -Verbose
+            $canCreateNewFile = $this.RetentionPolicy()
+        }
+        
         $preFileName = "{0}_$(($props.LogFileName))"
         $posFileName = [string]
         $finalName = [string]
+
         $lastFileID = ($this.GetTrackedValues(@{Reload = $true})).LogFileID
-        $reference = $this.GetTrackedValues(@{Reload = $false})
-       write-host " are logs being cycled : $($props.CycleLogs)"
+        
         # when logs arent being cycles, then just write to the same file
         if($props.CycleLogs -eq "false"){
             $posFileName = $preFileName -f $lastFileID
             $finalName = "$($props.LogFilePath)/$($posFileName)"
-            write-host $finalName
+
             if(-not (Test-Path -Path $finalName)){
                 New-Item -Path $finalName -ItemType "File"
             }else{
@@ -107,20 +213,19 @@ class PSLogger{
             }
         }else{
             $currentFileID = $lastFileID + $props.LogIdentity[1]
-            Write-Host "the current fileid is $currentfileID"
-            write-host "the prefilename is $preFileName"
             $posFileName = $preFileName -f $currentFileID
-            write-host "the post filename is $posfilename"
             $finalName = "$($props.LogFilePath)/$($posFileName)"
-            write-host "the final path is $finalName"
 
             if(-not (Test-Path -Path $finalName)){
-                New-Item -Path $finalName -ItemType "File"
-                $reference.LogFileID = $currentFileID
-                $reference = $reference | ConvertTo-Json
-                Set-Content -Path $props.TrackedValuesFile -Value $reference
-                # already reloaded in this work flow, no need to reload
-
+                if($canCreateNewFile){
+                    New-Item -Path $finalName -ItemType "File"
+                    $reference.LogFileID = $currentFileID
+                    $reference = $reference | ConvertTo-Json
+                    Set-Content -Path $props.TrackedValuesFile -Value $reference
+                }
+                else{
+                    Write-Verbose -Message "[CreateLogFile]:: can't create a new log file, the most recent log file is still within the retention period" -Verbose
+                }
             }else{
                 Write-host "log file $($finalName) already exists"
 
@@ -128,117 +233,53 @@ class PSLogger{
         }
         return $reference
     }
-    [psobject]UtilityTestFilePath([string]$FilePath){
-        if(-not(Test-Path $FilePath)){
-            return $false
-        }
-       Write-Verbose -Message 'passed test' -Verbose
-        return $true
-    }
 
     [psobject]GetHeadingProperties($logThis){
-        $headings = $($this.Configuration.LoggingFormat.Headings).split(" ")
+        $props = $this.GetConfiguration(@{Reload = $true})
+        
         $LogMessageList = @()
         $LogMessageOptionsTable = [ordered]@{
-            UserName    =  $env:USER
-            DateTime    = (Get-Date).ToString($this.Configuration.LoggingFormat.DateTimeFormat)
+            UserName    =  (EvaluateOS).OS_USER
+            DateTime    = (Get-Date).ToString($Props.DateTimeFormat)
             Message     = $logThis
-            HostName    = "ComputerName"
+            HostName    = (EvaluateOS).OS_HOST
         }
-        foreach($heading in $headings){
+        foreach($heading in $props.Headings){
            $LogMessageList += $LogMessageOptionsTable[$heading]
         }
         return $LogMessageList
     }
 
     [psobject]GetSeedProperties(){
-        $properties = ($this.Configuration.LoggingFormat.SeedValue).Split(" ")
+        $props = $this.GetConfiguration(@{Reload = $true})
         $SeedPropertiesTable = [ordered]@{
-            Seedof = $properties[0]
-            Incrementof = $properties[1]
+            Seedof = $props.EntryIdentity[0]
+            Incrementof = $props.EntryIdentity[1]
         }
         return $SeedPropertiesTable
     }
 
     [psobject]GetLastLogEntry(){
-        $LogFilePath = $this.Configuration.Logs.LogFilePath
+        $LogFilePath = ($this.GetCurrentLogFile()).mostRecentLog
         return Get-Content -Tail 1 -Path $LogFilePath
     }
 
-    [void]SetLastDelimeter(){
-        $this.Configuration.LastDelimeter = $this.GetLastDelimeter()
-    }
-
-    [psobject]GetLastDelimeter(){
-        $DelimeterTable = (Get-Content -Path $this.LastDelimeterPath | ConvertFrom-Json -AsHashtable)
-        return $DelimeterTable.LastDelimeter
-    }
-
-    [void]SaveLastDelimimeter(){
-        $outputDelimenter = @{
-            LastDelimeter = $this.GetConfiguration("Delimeter")
-        }
-        $outputDelimenter = $outputDelimenter | ConvertTo-Json
-        Set-Content -Path $this.LastDelimeterPath -Value $outputDelimenter
-    }
-
-
-
-    [void]UtilityReloadConfiguration([array]$Reload){
-        $propertyTable = @{
-            parentprops = [array]($this.Configuration.keys)
-        }
-        foreach($property in $propertyTable.parentprops){
-            if($this.Configuration.$property.keys -contains $Reload){
-                $Message = '{0} {1}' -f '+-',"Parent property: '$property'"
-                Write-Verbose $Message -Verbose
-                $NewValue = $this.GetConfiguration($Reload)
-                $this.Configuration.$property[$Reload[0]] = $NewValue
-            }
-        }
-    }
-
-    [psobject]GetConfiguration_old([string]$Property){
-        $Message = "+-- {0} '{1}'" -f "Getting '$($Property)' set value from",$this.ConfigFilePath
-        Write-Verbose $Message -Verbose
-
-        $ConfiguredProperties = Get-Content $this.ConfigFilePath | Convertfrom-Json
-        $PropertyObject = ($ConfiguredProperties | Select-Object $Property).$Property
-
-        if(-not($PropertyObject)){
-            $Message = "- {0} {1}" -f "The property provied $($Property)", "doesnt exists..."
-            Write-Verbose $Message -Verbose
-            return $false
-        }
-        $Message = "+-- {0} {1}" -f $Property,"value set..`n"
-        Write-Verbose $Message -Verbose
-        $this.Configuration.ConsoleView
-        return [string]$PropertyObject
-    }
-
     [void]LogThis([string]$logThis){
-        $LastDelimeter = $this.GetLastDelimeter()
-        write-host "the last delimeter: $LastDelimeter" -ForegroundColor cyan
+        $props = $this.GetTrackedValues(@{Reaload = $true})
+        $config_props = $this.GetConfiguration(@{Reload = $true})
+        write-host "the last delimeter: $($props.LastDelimeter)" -ForegroundColor cyan
         $SeedProps = $this.GetSeedProperties()
-        $Delimenter = $this.Configuration.LoggingFormat.Delimeter
-        $EnableLogging = $this.Configuration.Logs.EnableLogging
-        $LogFilePath = $this.Configuration.Logs.LogFilePath
+        $Delimenter = $config_props.Delimeter
+        $this.CreateLogFile()
+        $LogFilePath = ($this.GetCurrentLogFile()).mostRecentLog
         $lastEntryID = [int]
 
-        # check if logging is enabled
-        if($EnableLogging -eq 'true'){
-            if(-not($this.UtilityTestFilePath($LogFilePath))){
-                $Message = '{0}' -f "Invalid File Path: $LogFilePath"
-                Write-Verbose -Message $Message -Verbose
-            }
-        }
-    
         # get the last log entry
         $lastLine = $this.GetLastLogEntry()
        # return $LastDelimeter
         if($lastline){
             Write-Host "there was a last log entry"
-            $lastEntryID = [int]($lastLine.Split($LastDelimeter)[0])
+            $lastEntryID = [int]($lastLine.Split($props.LastDelimeter))[0]
         }else{
             Write-Host "Log is currently empty"
             $lastEntryID = [int]($SeedProps["Seedof"])
@@ -247,23 +288,19 @@ class PSLogger{
         $lastEntryID = $lastEntryID + $SeedProps["Incrementof"]
         $myLogEntry = @()
         $myLogEntry += $lastEntryID
+
         $myLogEntry += $this.GetHeadingProperties($logThis)
+
         $myLogEntry = $myLogEntry -join $Delimenter
         write-host "logging message" -ForegroundColor cyan
-       # return $MessageEntryTable
+
         Add-Content -Path $LogFilePath -Value $myLogEntry
-       # return $myLogEntry
-       write-host "saving the current delimenter to be used as last delimenter on next run $Delimenter" -ForegroundColor cyan
-        $this.SaveLastDelimimeter()
+
+        write-host "saving the current delimenter to be used as last delimenter on next run $Delimenter" -ForegroundColor cyan
+        $props.LastDelimeter = $Delimenter
+        $props = $props | ConvertTo-Json
+        Set-Content -Path $config_props.TrackedValuesFile -value $props
     }
 }
 $test= [PSLogger]::new()
-$test.GetTrackedValues(@{Reload = $true})
-# when reload = $true then its read from disk
-$test.GetConfiguration(@{Reload = $true}).Interval
-
-# when reload = $false then its read from memory
-$test.GetConfiguration(@{Reload = $false})
-
-$test.CreateLogFile()
-$test.RetentionPolicy()
+$test.LogThis("logthis")

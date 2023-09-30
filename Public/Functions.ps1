@@ -11,7 +11,21 @@ Function Greeting {
     '
     Write-Host $text
 }
-
+Function EvaluateOS{
+    if($IsWindows){
+        $OS_PARAMETERS = @{
+            OS_HOST = $env:COMPUTERNAME
+            OS_USER = $env:USERDOMAIN
+        }
+    }
+    if($IsMacOS){
+        $OS_PARAMETERS = @{
+            OS_HOST = "MAC_OS"
+            OS_USER = "MAC_USER"
+        }
+    }
+    $OS_PARAMETERS
+}
 Function PSLogger([switch]$InitializeLog){
     if($InitializeLog){
         $PSLogger = [PSLogger]::new()

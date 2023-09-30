@@ -4,5 +4,4 @@
     FunctionsToExport = @(
         "Greeting","PSLogger"
     )
-    
 }

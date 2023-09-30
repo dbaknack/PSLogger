@@ -29,3 +29,21 @@ $PSLogging.UtilityTestFilePath("./")
 $PSLogging.UtilityReloadConfiguration(@("Delimeter"))
 $PSLogging.GetConfiguration("SeedValue")
 $PSLogging.Message("This is a new message")
+
+
+
+
+$Test.LoadConfiguration()
+$test.GetTrackedValues(@{Reload = $true})
+# when reload = $true then its read from disk
+$test.GetConfiguration(@{Reload = $true}).Interval
+
+# when reload = $false then its read from memory
+$test.GetConfiguration(@{Reload = $false})
+
+$test.CreateLogFile()
+$test.RetentionPolicy()
+$test.GetCurrentLogFile()
+
+
+$test.TrackedValues
