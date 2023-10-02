@@ -1,4 +1,4 @@
-$ErrorActionPreference = 'stop'
+$ErrorActionPreference = 'Stop'
 Function EvaluateOS{
     if($IsWindows){
         $OS_PARAMETERS = @{
@@ -14,6 +14,9 @@ Function EvaluateOS{
     }
     $OS_PARAMETERS
 }
+$VerbosePreference = 'Continue'  # Turn on verbose output
+$VerbosePreference = 'SilentlyContinue'  # Turn off verbose output
+
 class PSLogger{
     $LogFormatTable = @{
         Properties = @(
@@ -40,72 +43,64 @@ class PSLogger{
         )
     }
     $ConfigFilePath = [string]"./Private/Configuration.json"
-    $Configuration = $this.GetConfiguration(@{Reload = $true})
-    $TrackedValues = $this.GetTrackedValues(@{Reload = $true})
+    $Configuration  = $this.GetConfiguration(@{Reload = $true})
+    $TrackedValues  = $this.GetTrackedValues(@{Reload = $true})
 
-    # first validate that the configurations looks like what we expect it to look like
     [psobject]ValidateConfiguration([hashtable]$fromSender){
         Write-Verbose -Message "[ValidateConfiguration]::running configuration validation..." -Verbose
         $allowedPropertiesList = $this.LogFormatTable.Properties
         $RESULTS_TABLE  =   @{
             isSuccessfull   =   [bool]
-            details         =   [psobject]
+            Data            =   [psobject]
         }
-        foreach($property in $fromSender.keys){
+        $propertiesList = $fromSender.keys
+        foreach($property in ($propertiesList)){
             if($allowedPropertiesList -notcontains $property){
                 $RESULTS_TABLE.isSuccessfull = $false
-                $RESULTS_TABLE.details = "not all the properties in your configuration file are allowed"
             }else{
                 $RESULTS_TABLE.isSuccessfull = $true
             }
         }
+        if($RESULTS_TABLE.isSuccessfull -eq $false){
+            Write-Error -Message "[ValidateConfiguration]:: not all the properties in your configuration file are allowed" -Category "InvalidData" 
+        }
+        $RESULTS_TABLE.Data = $propertiesList
         return $RESULTS_TABLE
     }
-    
-    # method to set the configuration
+
     [void]SetConfiguration([hashtable]$fromSender){
-        Write-Verbose -Message "[SetConfiguration]::setting the configuration from disk to the class parameter..." -Verbose
+        Write-Verbose -Message "[SetConfiguration]::setting the configuration from disk to the class parameter...`n" -Verbose
         $this.Configuration = $fromSender
     }
 
-    # method to set the tracked values
     [void]SetTrackedValues([hashtable]$fromSender){
         Write-Verbose -Message "[SetConfiguration]::setting the tracked values from disk to the class parameter..." -Verbose
         $this.TrackedValues = $fromSender
     }
 
-    # the configuration file gets read into memory
     [psobject]LoadConfiguration(){
         Write-Verbose -Message "[LoadConfiguration]::reading configuration from disk..." -Verbose
         $RESULTS_TABLE  =   @{
             isSuccessfull   =   [bool]
-            details         =   [psobject]
+            Data            =   [psobject]
         }
         $preLoadedConfiguration = ((Get-Content $this.ConfigFilePath) | ConvertFrom-Json -AsHashtable)
         $RESULTS_TABLE = ($this.ValidateConfiguration($preLoadedConfiguration))
        
-        if( -not ($RESULTS_TABLE.isSuccessfull)){
-            Write-Error -Message $RESULTS_TABLE.details -Category "InvalidData"
-        }
-
-        # the configuration is set if its valid
         $this.SetConfiguration($preLoadedConfiguration)
         return $RESULTS_TABLE
     }
 
     [void]LoadTrackedValues(){
         Write-Verbose -Message "[LoadTrackedValues]::reading tracked values from disk..." -Verbose
-        $props = $this.GetConfiguration(@{Reload = $true})
+        $props = $this.GetConfiguration(@{Reload = $false})
         
         $preLoadedTrackedValues = (Get-Content $props.TrackedValuesFile) | ConvertFrom-Json -AsHashtable
        
-        # the tracked is set
         $this.SetTrackedValues($preLoadedTrackedValues)
     }
 
-    # get the configuration, at this point its in memory, LoadConfiguration to get new changes
     [psobject]GetConfiguration([hashtable]$fromSender){
-        # if reload is true, the configuration is read from disk
         switch($fromSender.Reload){
             $true {
                 Write-Verbose -Message "[GetConfiguration]::loading configuration from disk..." -Verbose
@@ -131,80 +126,110 @@ class PSLogger{
         return $this.TrackedValues
     }
 
-    [psobject]RetentionPolicy(){
-        $props = $this.GetConfiguration(@{Reload = $true})
-        $logFileList = (Get-ChildItem -Path  $props.LogFilePath -Filter "*$($props.LogFileName)") 
+    [psobject]RetentionPolicy([hashtable]$fromSender){
+        Write-Verbose -Message "-+ [RetentionPolicy]" -Verbose
+        $RESULTS_TABLE  =   @{
+            isSuccessfull   = [bool]
+            Data            = @{}
+        }
 
-        $retentionList = $logFileList | Sort-Object -Property  LastWriteTime -Descending | Select-Object -First ($props.Retention.mostrecent -1)
-        $canCreateNewFile = $true
-        $mostRecentLog =  ($this.GetCurrentLogFile()).mostRecentLog
-        write-host $mostRecentLog -f Blue
-        [string]$myInterval = $props.Interval.keys
-        [string]$myIntervalValue = $props.Interval.values
+        $RESULTS_TABLE.Data.Add("CanCreateNewFile",$true)
+        if($fromSender.Reload){
+            Write-Verbose -Message "--+ Reloading configuration" -Verbose
+        }else{
+            Write-Verbose -Message "--+ Not realoding configuration" -Verbose
+        }
+        $config         = $this.GetConfiguration($fromSender)
+        $logFileList    = (Get-ChildItem -Path  $config.LogFilePath -Filter "*$($config.LogFileName)") 
+        $retentionList  = $logFileList | Sort-Object -Property  "LastWriteTime" -Descending | Select-Object -First ($config.Retention.mostrecent -1)
 
-        $DateTimeCommandString= ('(Get-Date).Add{0}(-{1})' -f ($myInterval),($myIntervalValue))
-        $scriptBlock = [scriptblock]::Create($DateTimeCommandString)
-        $DateTimeOffset = Invoke-Command -ScriptBlock $scriptBlock
+        $mostRecentLog              =   ($this.GetCurrentLogFile(@{Reload = $false}))
+        [string]$myInterval         =   $config.Interval.keys
+        [string]$myIntervalValue    =   $config.Interval.values
 
-        # the second the most recent file is older than than $DateTimeOffset the policy is checked
-        if(($mostRecentLog.CreationTime) -lt $DateTimeOffset){
-            Write-Host "Most recent log has a creationg time of  $(($mostRecentLog.CreationTime).ToString('yyyy-MM-dd HH:mm:ss'))" -ForegroundColor red
-            Write-host "The datetime offset is $(($DateTimeOffset).ToString('yyyy-MM-dd HH:mm:ss'))" -ForegroundColor red
+        $DateTimeCommandString  = ('(Get-Date).Add{0}(-{1})' -f ($myInterval),($myIntervalValue))
+        $scriptBlock            = [scriptblock]::Create($DateTimeCommandString)
+        $DateTimeOffset         = Invoke-Command -ScriptBlock $scriptBlock
+
+        if(($mostRecentLog.Data.CreationTime) -lt $DateTimeOffset){
+            Write-Verbose -Message "--+ Per the retention policy, purging some files..." -Verbose
             $logFileList | Select-Object -Property * | Where-Object {$retentionList.Name -notcontains $_.Name} | Remove-Item
             
        }else{
-            Write-Host "Most recent log has a creationg time of  $(($mostRecentLog.CreationTime).ToString('yyyy-MM-dd HH:mm:ss'))" -ForegroundColor Cyan
-            Write-host "The datetime offset is $(($DateTimeOffset).ToString('yyyy-MM-dd HH:mm:ss'))" -ForegroundColor Cyan
-            $canCreateNewFile = $false
+            Write-Verbose -Message "[RetentionPolicy]:: per the retention policy, no new files can be created..." -Verbose
+            $RESULTS_TABLE.Data.GetConfiguration = $false
        }
-       return $canCreateNewFile
+       return $RESULTS_TABLE
     }
 
-    [psobject]GetCurrentLogFile(){
-        # reloading configuration
-        $props = $this.GetConfiguration(@{Reload = $true})
-        $logFileList = (Get-ChildItem -Path  $props.LogFilePath -Filter "*$($props.LogFileName)")
+    [psobject]GetCurrentLogFile($fromSender){
+        Write-Verbose -Message "-+ [GetCurrentLogFile]" -Verbose
+        $RESULTS_TABLE  =   @{
+            isSuccessfull   = [bool]
+            Data            = [psobject]
+        }
+
+        if($fromSender.Reload){
+            Write-Verbose -Message "--+ Reloading configuration" -Verbose
+        }else{
+            Write-Verbose -Message "--+ Not Realoading configuration" -Verbose
+        }
+
+        $config = $this.GetConfiguration($fromSender)
+        if( -not (Test-Path -Path "$($config.LogFilePath)")){
+            Write-Error -Message "The path in your configuration file '$($config.LogFilePath)' is not reachable"
+        }else{
+            Write-Verbose -Message "--+ The path in your configuration file '$($config.LogFilePath)' is valid" -Verbose
+        }
+
+        $logFileList = (Get-ChildItem -Path  $config.LogFilePath -Filter "*$($config.LogFileName)")
         if($null -eq $logFileList){
-            write-verbose -Message "[GetCurrentLogFile]:: there is no current log file in the given location" -Verbose
-            $mostRecentLog = @{
-                isNull = $true
+            Write-Verbose -Message "--+ The log file location is empty" -Verbose
+            $RESULTS_TABLE.isSuccessfull = $true
+            $RESULTS_TABLE.Data = @{
+                isNull          = $true
+                mostRecentLog   = $null
             }
         }else{
-            $mostRecentLog = @{
-                isNull = $false
-                mostRecentLog = $logFileList | Sort-Object -Property  LastWriteTime -Descending | Select-Object -First 1
+            Write-Verbose -Message "--+ The log file location has '$($logFileList.count)' log files" -Verbose
+            $RESULTS_TABLE.isSuccessfull = $true
+            $RESULTS_TABLE.Data = @{
+                isNull          = $false
+                mostRecentLog   = $logFileList | Sort-Object -Property  LastWriteTime -Descending | Select-Object -First 1
             }
         }
-        return $mostRecentLog
+        return $RESULTS_TABLE
     }
 
-    [psobject]CreateLogFile(){
-        $props = $this.GetConfiguration(@{Reload = $true})
-        $reference = $this.GetTrackedValues(@{Reload = $true}) 
-        $canCreateNewFile = [bool]
-        # if there is no log file(s), we can reset the logfileid
-        if(($this.GetCurrentLogFile()).isNull){
-            Write-Verbose -Message "[GetConfiguration]:: reseeding the tracked value properties" -Verbose
-            $reference = $this.GetTrackedValues(@{Reload = $true})    
-            $reference.LogFileID = $props.LogIdentity[0]
-            $reference.LastDelimeter = $props.Delimeter
-            $reset_TrackedValues = $reference | ConvertTo-Json
-            Set-Content -Path $props.TrackedValuesFile -Value $reset_TrackedValues
+    [psobject]CreateLogFile([hashtable]$fromSender){
+        Write-Verbose -Message "-+ [CreateLogFile]" -Verbose
+
+        $config     = $this.GetConfiguration($fromSender)
+        $trackedVal = $this.GetTrackedValues($fromSender)
+        $canCreateNewFile = $true
+
+        if(($this.GetCurrentLogFile($fromSender)).Data.isNull){
+            Write-Verbose -Message "--+ No current log file present in $($config.LogFilePath), resettings LogFileID" -Verbose
+            $resetTrackedValues = [ordered]@{
+                LogFileID       = $config.LogIdentity[0]
+                LastDelimeter   = $config.Delimeter
+            }
+            $resetTrackedValues = $resetTrackedValues  | ConvertTo-Json
+            Set-Content -Path $config.TrackedValuesFile -Value $resetTrackedValues
         }else{
-            Write-Verbose -Message "[GetConfiguration]:: using the current tracked value properties" -Verbose
-            $canCreateNewFile = $this.RetentionPolicy()
+            Write-Verbose -Message "--+ Checking the retention values" -Verbose
+            $canCreateNewFile = $this.RetentionPolicy(@{Reload = $true}).Data.CanCreateNewFile
         }
         
-        $preFileName = "{0}_$(($props.LogFileName))"
+        $preFileName = "{0}_$(($config.LogFileName))"
         $posFileName = [string]
         $finalName = [string]
 
-        $lastFileID = ($this.GetTrackedValues(@{Reload = $true})).LogFileID
-        
-        # when logs arent being cycles, then just write to the same file
-        if($props.CycleLogs -eq "false"){
+        $lastFileID = ($this.GetTrackedValues(@{Reload = $false})).LogFileID
+
+        if($config.CycleLogs -eq "false"){
             $posFileName = $preFileName -f $lastFileID
-            $finalName = "$($props.LogFilePath)/$($posFileName)"
+            $finalName = "$($config.LogFilePath)/$($posFileName)"
 
             if(-not (Test-Path -Path $finalName)){
                 New-Item -Path $finalName -ItemType "File"
@@ -212,30 +237,30 @@ class PSLogger{
                 Write-host "log file $($finalName) already exists"
             }
         }else{
-            $currentFileID = $lastFileID + $props.LogIdentity[1]
+            $currentFileID = $lastFileID + $config.LogIdentity[1]
             $posFileName = $preFileName -f $currentFileID
-            $finalName = "$($props.LogFilePath)/$($posFileName)"
+            $finalName = "$($config.LogFilePath)/$($posFileName)"
 
             if(-not (Test-Path -Path $finalName)){
                 if($canCreateNewFile){
                     New-Item -Path $finalName -ItemType "File"
-                    $reference.LogFileID = $currentFileID
-                    $reference = $reference | ConvertTo-Json
-                    Set-Content -Path $props.TrackedValuesFile -Value $reference
+                    $trackedVal.LogFileID = $currentFileID
+                    $trackedVal = $trackedVal | ConvertTo-Json
+                    Set-Content -Path $config.TrackedValuesFile -Value $trackedVal
                 }
                 else{
-                    Write-Verbose -Message "[CreateLogFile]:: can't create a new log file, the most recent log file is still within the retention period" -Verbose
+                    Write-Verbose -Message "--+ Can't create a new log file, the most recent log file is still within the retention period" -Verbose
                 }
             }else{
-                Write-host "log file $($finalName) already exists"
+                Write-Verbose -Message "--+ file already exists" -Verbose
 
             }
         }
-        return $reference
+        return $true
     }
 
     [psobject]GetHeadingProperties($logThis){
-        $props = $this.GetConfiguration(@{Reload = $true})
+        $props = $this.GetConfiguration(@{Reload = $false})
         
         $LogMessageList = @()
         $LogMessageOptionsTable = [ordered]@{
@@ -250,33 +275,49 @@ class PSLogger{
         return $LogMessageList
     }
 
-    [psobject]GetSeedProperties(){
-        $props = $this.GetConfiguration(@{Reload = $true})
-        $SeedPropertiesTable = [ordered]@{
-            Seedof = $props.EntryIdentity[0]
-            Incrementof = $props.EntryIdentity[1]
+    [psobject]GetSeedProperties([hashtable]$fromSender){
+        Write-Verbose -Message "-+ [GetSeedProperties]" -Verbose
+        $RESULTS_TABLE  =   @{
+            isSuccessfull   =   [bool]
+            Data            =   [psobject]
         }
-        return $SeedPropertiesTable
+
+        if($fromSender.Reload){
+            Write-Verbose -Message "--+ Reload configuration: 'true'" -Verbose
+        }else{
+            Write-Verbose -Message "--+ Reload configuration: 'false'" -Verbose
+        }
+        $config = $this.GetConfiguration($fromSender)
+        $RESULTS_TABLE.Data = [ordered]@{
+            Seedof      = $config.EntryIdentity[0]
+            Incrementof = $config.EntryIdentity[1]
+        }
+        return $RESULTS_TABLE
     }
 
     [psobject]GetLastLogEntry(){
+        # GetCurrentLogFile (->)
         $LogFilePath = ($this.GetCurrentLogFile()).mostRecentLog
         return Get-Content -Tail 1 -Path $LogFilePath
     }
 
     [void]LogThis([string]$logThis){
-        $props = $this.GetTrackedValues(@{Reaload = $true})
-        $config_props = $this.GetConfiguration(@{Reload = $true})
-        write-host "the last delimeter: $($props.LastDelimeter)" -ForegroundColor cyan
-        $SeedProps = $this.GetSeedProperties()
-        $Delimenter = $config_props.Delimeter
-        $this.CreateLogFile()
+        $props          = $this.GetTrackedValues(@{Reaload = $true})
+        $config_props   = $this.GetConfiguration(@{Reload = $true})
+        $Delimenter     = $config_props.Delimeter
+
+        Write-Verbose -Message "-+ [LogThis]" -Verbose
+        Write-Verbose -Message "--+ LastDelimeter: '$($props.LastDelimeter)'" -Verbose
+        Write-Verbose -Message "--+ LogFileID: '$($props.LogFileID)'`n" -Verbose
+        
+        $SeedProps  = $this.GetSeedProperties(@{Reload = $false})
+        
+        Write-Verbose -Message "-+ [LogThis]" -Verbose
+        $this.CreateLogFile(@{Reload = $false})
         $LogFilePath = ($this.GetCurrentLogFile()).mostRecentLog
         $lastEntryID = [int]
 
-        # get the last log entry
         $lastLine = $this.GetLastLogEntry()
-       # return $LastDelimeter
         if($lastline){
             Write-Host "there was a last log entry"
             $lastEntryID = [int]($lastLine.Split($props.LastDelimeter))[0]
@@ -302,5 +343,48 @@ class PSLogger{
         Set-Content -Path $config_props.TrackedValuesFile -value $props
     }
 }
+
 $test= [PSLogger]::new()
-$test.LogThis("logthis")
+$test.GetCurrentLogFile(@{Reload = $true})
+$test.GetCurrentLogFile(@{Reload = $false})
+
+
+
+$test.GetTrackedValues(@{Reaload = $false})
+
+# when 
+$test.CreateLogFile(@{Reload = $true})
+$test.CreateLogFile(@{Reload = $false})
+
+$test.RetentionPolicy(@{Reload = $true})
+$test.RetentionPolicy(@{Reload = $false}).data.CanCreateNewFile
+
+$test.ValidateConfiguration(
+    $test.GetConfiguration(@{Reload = $true})
+)
+
+$test.ValidateConfiguration(
+    $test.GetConfiguration(@{Reload = $false})
+)
+
+$test.LoadConfiguration()
+$test.LoadTrackedValues()
+$test.Configuration
+$test.LogThis("this is something i want to track with a log entry")
+$test.GetSeedProperties($test.GetConfiguration(@{Reload = $true}))
+
+
+(Get-ChildItem -Path ./Test/Logs).count
+
+$test.GetTrackedValues(@{Reload = $true})
+
+$test.GetTrackedValues(@{Reload = $false})
+
+# when reload = $true then its read from disk
+
+$test.GetConfiguration(@{Reload = $false})
+
+$test.CreateLogFile(@{Reload = $false})
+
+
+$test.GetCurrentLogFile()

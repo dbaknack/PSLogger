@@ -8,14 +8,14 @@
     "EntryIdentity":[0,1],
     "LogIdentity":[0,1],
     "DateTimeFormat":"yyyy-MM-dd HH:mm:ss",
-    "Delimeter":"|",
+    "Delimeter":",",
     "OutputColor":"red",
     "CycleLogs":"true",
     "Interval":{
-        "seconds":20
+        "seconds":10
     },
     "Retention":{
-        "mostrecent": 3
+        "mostrecent": 5
     },
     "LogFilePath" :"./Test/Logs",
     "LogFileName":"Test.logs",
