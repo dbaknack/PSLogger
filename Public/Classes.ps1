@@ -14,8 +14,8 @@ Function EvaluateOS{
     }
     $OS_PARAMETERS
 }
-$VerbosePreference = 'Continue'  # Turn on verbose output
-$VerbosePreference = 'SilentlyContinue'  # Turn off verbose output
+$VerbosePreference = 'Continue'
+$VerbosePreference = 'SilentlyContinue'
 
 class PSLogger{
     $LogFormatTable = @{
@@ -42,12 +42,23 @@ class PSLogger{
             "Message"
         )
     }
+    $usePadding = $false
+    $pad        = 0
+    $padSymbole = [string]"."
+    $padLastDecorator = 2
     $ConfigFilePath = [string]"./Private/Configuration.json"
     $Configuration  = $this.GetConfiguration(@{Reload = $true})
     $TrackedValues  = $this.GetTrackedValues(@{Reload = $true})
 
     [psobject]ValidateConfiguration([hashtable]$fromSender){
-        Write-Verbose -Message "[ValidateConfiguration]::running configuration validation..." -Verbose
+        $padstring = $null
+        if($this.UsePadding){
+            # this is a child process
+            $padadd = " " *$($this.pad)
+            $padstring = "$padadd|"
+        }
+        Write-Verbose -Message "$padstring-+[ValidateConfiguration]`n           $padstring" -verbose
+        Write-Verbose -Message "$padstring--+ running configuration validation" -Verbose
         $allowedPropertiesList = $this.LogFormatTable.Properties
         $RESULTS_TABLE  =   @{
             isSuccessfull   =   [bool]
@@ -69,7 +80,14 @@ class PSLogger{
     }
 
     [void]SetConfiguration([hashtable]$fromSender){
-        Write-Verbose -Message "[SetConfiguration]::setting the configuration from disk to the class parameter...`n" -Verbose
+        $padstring = $null
+        if($this.UsePadding){
+            # this is a child process
+            $padadd = " " *$($this.pad)
+            $padstring = "$padadd|"
+        }
+        Write-Verbose -Message "$padstring-+[SetConfiguration]`n           $padstring" -Verbose
+        Write-Verbose -Message "$padstring--+setting the configuration from disk to the class parameter" -Verbose
         $this.Configuration = $fromSender
     }
 
@@ -79,15 +97,39 @@ class PSLogger{
     }
 
     [psobject]LoadConfiguration(){
-        Write-Verbose -Message "[LoadConfiguration]::reading configuration from disk..." -Verbose
+        $METHOD_NAME = "LoadConfiguration"
+        #------------------------------------------
+        $decorator = @{
+            head = "-+"
+            sub = "--+"
+        }
+        $padstring = [string]
+        if($this.UsePadding){
+            $padAdd = $this.padSymbole * $($this.pad)
+            $offset = ' ' * $this.padLastDecorator
+            $padString = "$padAdd|{0}"
+            $padstring = "$($padstring -f $decorator.head)[$METHOD_NAME]`n$(' '*$('VERBOSE: '.Length))$($offset)$($padAdd)|"
+            
+        }else{
+            $padstring = "{0}"
+            $padstring = $padstring -f $decorator.head
+        }
+        #------------------------------------------
+        Write-Verbose -Message "$padstring" -Verbose
+        #Write-Verbose -Message "$padstring--+reading configuration from disk..." -Verbose
         $RESULTS_TABLE  =   @{
             isSuccessfull   =   [bool]
             Data            =   [psobject]
         }
         $preLoadedConfiguration = ((Get-Content $this.ConfigFilePath) | ConvertFrom-Json -AsHashtable)
+
+        $this.pad = $this.pad + $($decorator.head)
         $RESULTS_TABLE = ($this.ValidateConfiguration($preLoadedConfiguration))
+        $this.pad = $this.pad - $($decorator.head)
        
+        $this.pad = $this.pad + 1
         $this.SetConfiguration($preLoadedConfiguration)
+        $this.pad = $this.pad - 1
         return $RESULTS_TABLE
     }
 
@@ -101,13 +143,46 @@ class PSLogger{
     }
 
     [psobject]GetConfiguration([hashtable]$fromSender){
+        $METHOD_NAME = "GetConfiguration"
+        #------------------------------------------
+        $decorator = @{
+            head = "-+"
+            sub = "--+"
+        }
+        $padstring = [string]
+        if($this.UsePadding){
+            $padAdd = $this.padSymbole * $($this.pad)
+            $offset = ' ' * $this.padLastDecorator
+            $padString = "$padAdd|{0}"
+            $padstring = "$($padstring -f $decorator.head)[$METHOD_NAME]`n$(' '*$('VERBOSE: '.Length))$($offset)$($padAdd)|"
+            
+        }else{
+            $padstring = "{0}"
+            $padstring = $padstring -f $decorator.head
+        }
+        #------------------------------------------
+        Write-Verbose -Message "$padstring" -Verbose
+
         switch($fromSender.Reload){
             $true {
-                Write-Verbose -Message "[GetConfiguration]::loading configuration from disk..." -Verbose
+                if($this.UsePadding){
+                    $padAdd = $this.padSymbole * $($this.pad)
+                    $offset = ' ' * $this.padLastDecorator
+                    $padString = "$padAdd|{0}"
+                    $padstring = "$offset$($padstring -f $decorator.sub)loading configuration from disk"
+                    
+                }else{
+                    $padstring = "{0}"
+                    $padstring = $padstring -f $decorator.sub
+                }
+                Write-Verbose -Message "$padstring" -Verbose
+
+                $this.pad = $this.pad + $($decorator.sub)
                 $this.LoadConfiguration()
+                $this.pad = $this.pad - $($decorator.sub)
             }
             default {
-                Write-Verbose -Message "[GetConfiguration]::getting configuration from class parameter(s)..." -Verbose
+                Write-Verbose -Message "getting configuration from class parameter(s)..." -Verbose
             }
         }
         return $this.Configuration
@@ -177,6 +252,7 @@ class PSLogger{
 
         $config = $this.GetConfiguration($fromSender)
         if( -not (Test-Path -Path "$($config.LogFilePath)")){
+            $RESULTS_TABLE.isSuccessfull = $false
             Write-Error -Message "The path in your configuration file '$($config.LogFilePath)' is not reachable"
         }else{
             Write-Verbose -Message "--+ The path in your configuration file '$($config.LogFilePath)' is valid" -Verbose
@@ -202,12 +278,14 @@ class PSLogger{
     }
 
     [psobject]CreateLogFile([hashtable]$fromSender){
+        Clear-Host
         Write-Verbose -Message "-+ [CreateLogFile]" -Verbose
 
         $config     = $this.GetConfiguration($fromSender)
         $trackedVal = $this.GetTrackedValues($fromSender)
         $canCreateNewFile = $true
 
+        # check to see if we can create a log file or not
         if(($this.GetCurrentLogFile($fromSender)).Data.isNull){
             Write-Verbose -Message "--+ No current log file present in $($config.LogFilePath), resettings LogFileID" -Verbose
             $resetTrackedValues = [ordered]@{
@@ -225,9 +303,10 @@ class PSLogger{
         $posFileName = [string]
         $finalName = [string]
 
-        $lastFileID = ($this.GetTrackedValues(@{Reload = $false})).LogFileID
+        $lastFileID = ($trackedVal).LogFileID
 
         if($config.CycleLogs -eq "false"){
+            Write-Verbose -Message "--+ Cycling logs is 'disabled'" -Verbose
             $posFileName = $preFileName -f $lastFileID
             $finalName = "$($config.LogFilePath)/$($posFileName)"
 
@@ -237,6 +316,7 @@ class PSLogger{
                 Write-host "log file $($finalName) already exists"
             }
         }else{
+            Write-Verbose -Message "--+ Cycling logs is 'enabled'" -Verbose
             $currentFileID = $lastFileID + $config.LogIdentity[1]
             $posFileName = $preFileName -f $currentFileID
             $finalName = "$($config.LogFilePath)/$($posFileName)"
@@ -275,6 +355,81 @@ class PSLogger{
         return $LogMessageList
     }
 
+    [void]ClearAllLogs(){
+        Write-Verbose -Message "-+ [ClearAllLogs]" -Verbose
+        $config = $this.GetConfiguration(@{Reaload = $true})
+        $logFileList = Get-ChildItem -path ($config.LogFilePath)  
+        if($logFileList.Count -eq 0){
+            Write-Verbose -Message "--+ No logs exists to remove" -Verbose
+        }else{
+            Write-Verbose -Message "--+ Removing '$($logFileList.count)' log files" -Verbose
+            $logFileList | Remove-Item -Force
+        }
+    }
+    [void]ResetTrackedValues([hashtable]$fromSender){
+        $METHOD_NAME = "ResetTrackedValue"
+        #------------------------------------------
+        $decorator = @{
+            head = "-+"
+            sub = "--+"
+        }
+        $padstring = [string]
+        if($this.UsePadding){
+            $padAdd = $this.padSymbole * $($this.pad)
+            $offset = ' ' * $this.padLastDecorator
+            $padString = "$padAdd|{0}"
+            $padstring = "$($padstring -f $decorator.head)[$METHOD_NAME]`n$(' '*$('VERBOSE: '.Length))$($offset)$($padAdd)|"
+            
+        }else{
+            $padstring = "{0}"
+            $padstring = $padstring -f $decorator.head
+        }
+        
+        #------------------------------------------
+        Write-Verbose -Message "$padstring" -Verbose
+
+        $METHOD_PARAMS_LIST = @(
+            "Reload",
+            "UseDefaults"
+        )
+
+        $methodParamsCopy = $METHOD_PARAMS_LIST
+        foreach($userParam in $fromSender.Keys){
+            if($methodParamsCopy -contains $userParam){
+                $methodParamsCopy = $methodParamsCopy | Where-Object {$_ -ne $userParam}
+            }
+        }
+
+        if($methodParamsCopy.count -gt 0){
+            Write-Error -Message "[$METHOD_NAME] - missing the following parameter (s): '$($methodParamsCopy -join ("', '"))'" -Category "NotSpecified"
+        }
+        
+        $DEFAUL_TRACKED_VALUES_TABLE = [ordered]@{
+            LogFileID = 0
+            LastDelimeter = ","
+        }
+        
+        $this.Pad = $this.Pad + $this.padLastDecorator
+        $config = $this.GetConfiguration($fromSender)
+        $this.Pad = $this.Pad - $this.padLastDecorator
+        
+
+        if( -not (Test-Path -Path $($config.TrackedValuesFile))){
+            Write-Error -Message "--+the path for tracked values '$($config.TrackedValuesFile)' is not valid" -Category "ObjectNotFound"
+        }else{
+            Write-Verbose -Message "--+ The path for tracked values '$($config.TrackedValuesFile)' is valid" -Verbose
+        }
+
+        if($fromSender.UseDefaults){
+            Set-Content -Path $config.TrackedValuesFile -Value ($DEFAUL_TRACKED_VALUES_TABLE | ConvertTo-Json)
+            Write-Verbose -Message "--+ Reset tracked values with the defaults" -Verbose
+
+        }else{
+            Set-Content -Path $config.TrackedValuesFile -Value ($DEFAUL_TRACKED_VALUES_TABLE | ConvertTo-Json)
+            Write-Verbose -Message "--+ Reset tracked values with the values in the configuration file '$($config.TrackedValuesFile)'" -Verbose
+        }
+
+    }
     [psobject]GetSeedProperties([hashtable]$fromSender){
         Write-Verbose -Message "-+ [GetSeedProperties]" -Verbose
         $RESULTS_TABLE  =   @{
@@ -296,7 +451,6 @@ class PSLogger{
     }
 
     [psobject]GetLastLogEntry(){
-        # GetCurrentLogFile (->)
         $LogFilePath = ($this.GetCurrentLogFile()).mostRecentLog
         return Get-Content -Tail 1 -Path $LogFilePath
     }
@@ -343,8 +497,13 @@ class PSLogger{
         Set-Content -Path $config_props.TrackedValuesFile -value $props
     }
 }
-
+$test.ClearAllLogs()
+$test.pad = 4
+$test.UsePadding = $true
+$test.padSymbole = "."
+$test.ResetTrackedValues(@{Reload = $true; UseDefaults = $true})
 $test= [PSLogger]::new()
+
 $test.GetCurrentLogFile(@{Reload = $true})
 $test.GetCurrentLogFile(@{Reload = $false})
 
@@ -352,7 +511,7 @@ $test.GetCurrentLogFile(@{Reload = $false})
 
 $test.GetTrackedValues(@{Reaload = $false})
 
-# when 
+#The count is not resettings
 $test.CreateLogFile(@{Reload = $true})
 $test.CreateLogFile(@{Reload = $false})
 
@@ -387,4 +546,5 @@ $test.GetConfiguration(@{Reload = $false})
 $test.CreateLogFile(@{Reload = $false})
 
 
-$test.GetCurrentLogFile()
+$test.GetCurrentLogFile(@{Reload = $true})
+$test.UsePadding
