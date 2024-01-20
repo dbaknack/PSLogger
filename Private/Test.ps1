@@ -5,7 +5,7 @@ class VerboseMessage{
     }
     $Padding = @{
         By = 0
-        Symbole = " "
+        Symbole = "."
         String = [string]
     }
     $Tracker =@{
@@ -16,10 +16,67 @@ class VerboseMessage{
         Name    = $null
     }
     $Decorators = @{
-        Parent  = "-+"
-        Nested  = "|++"
-        Process = "|-+"
+        Parent  = "|-+"
+        Process = "|"
         Final   = "+-|"
+    }
+    [void]Test4(){
+        $methodName = "Test4"
+        $WriteVerboseParams = @{
+            Message = [string]
+            MsgType = [string]
+            isFinal = $false
+            CallerName = $methodName
+        }
+        
+        $WriteVerboseParams.Message =" $methodName"
+        $WriteVerboseParams.MsgType = "Parent"
+        $this.WriteVerbose($WriteVerboseParams)
+Write-Verbose -Message "test" -Verbose
+
+        $WriteVerboseParams.Message = " im the first subprocess"
+        $WriteVerboseParams.MsgType = "Process"
+        $this.WriteVerbose($WriteVerboseParams)
+
+        $WriteVerboseParams.Message = " im the seconds subprocess"
+        $WriteVerboseParams.MsgType = "Process"
+        $this.WriteVerbose($WriteVerboseParams)
+
+        $WriteVerboseParams.Message = " im the last subprocess, this is the final message"
+        $WriteVerboseParams.MsgType = "Process"
+        $WriteVerboseParams.isFinal = $true
+        $this.WriteVerbose($WriteVerboseParams)
+
+        $this.ResetVerbose($WriteVerboseParams)
+    }
+    [void]Test3(){
+        $methodName = "Test3"
+        $WriteVerboseParams = @{
+            Message = [string]
+            MsgType = [string]
+            isFinal = $false
+            CallerName = $methodName
+        }
+        
+        $WriteVerboseParams.Message =" $methodName"
+        $WriteVerboseParams.MsgType = "Parent"
+        $this.WriteVerbose($WriteVerboseParams)
+
+        $this.Test4()
+        $WriteVerboseParams.Message = " im the first subprocess"
+        $WriteVerboseParams.MsgType = "Process"
+        $this.WriteVerbose($WriteVerboseParams)
+
+        $WriteVerboseParams.Message = " im the seconds subprocess"
+        $WriteVerboseParams.MsgType = "Process"
+        $this.WriteVerbose($WriteVerboseParams)
+
+        $WriteVerboseParams.Message = " in the subprocess, this is the final message"
+        $WriteVerboseParams.MsgType = "Process"
+        $WriteVerboseParams.isFinal = $true
+        $this.WriteVerbose($WriteVerboseParams)
+
+        $this.ResetVerbose($WriteVerboseParams)
     }
     [void]Test2(){
         $methodName = "Test2"
@@ -35,7 +92,12 @@ class VerboseMessage{
         $this.WriteVerbose($WriteVerboseParams)
 
 
-        $WriteVerboseParams.Message = " in the subprocess"
+        $WriteVerboseParams.Message = " im the first subprocess"
+        $WriteVerboseParams.MsgType = "Process"
+        $this.WriteVerbose($WriteVerboseParams)
+
+        $this.Test3()
+        $WriteVerboseParams.Message = " im the seconds subprocess"
         $WriteVerboseParams.MsgType = "Process"
         $this.WriteVerbose($WriteVerboseParams)
 
@@ -43,7 +105,6 @@ class VerboseMessage{
         $WriteVerboseParams.MsgType = "Process"
         $WriteVerboseParams.isFinal = $true
         $this.WriteVerbose($WriteVerboseParams)
-
         $this.ResetVerbose($WriteVerboseParams)
     }
     [void]Test1(){
@@ -61,19 +122,18 @@ class VerboseMessage{
         $this.WriteVerbose($WriteVerboseParams)
 
 
-        $WriteVerboseParams.Message = " in in the parent, but im the first subprocess"
+        $WriteVerboseParams.Message = " im in the parent, but im the first subprocess"
         $WriteVerboseParams.MsgType = "Process"
         $this.WriteVerbose($WriteVerboseParams)
 
-        $WriteVerboseParams.Message = " in in the parent, but im the second subprocess"
+        $WriteVerboseParams.Message = " im in the parent, but im the second subprocess"
         $WriteVerboseParams.MsgType = "Process"
         $this.WriteVerbose($WriteVerboseParams)
 
 
-        #$this.Padding.By = $this.Padding.By -2
         $this.Test2()
+        $this.Test3()
 
-        #$this.Padding.By = $this.Padding.By -2
         $WriteVerboseParams.Message = " in the final subprocess of my parent"
         $WriteVerboseParams.MsgType = "Process"
         $WriteVerboseParams.isFinal = $true
@@ -81,102 +141,79 @@ class VerboseMessage{
         $this.ResetVerbose($WriteVerboseParams)
     }
     [void]ResetVerbose([hashtable]$fromSender){
-
-        if($null -eq $this.ImTheParent.Name){
-            #write-host "no one has called dibs on parent"
-            $this.ImTheParent.Name = $fromSender.CallerName
-        }
-        else{
-            #Write-host "only the parent gets to reset the bit"
-            if(($fromSender.CallerName) -match ($this.ImTheParent.Name)){
-                $this.ImTheParent.bit = 0
-            }else{
-                #write-host "the caller $($fromSender.CallerName) not =  $($this.ImTheParent.Name), cant reset bit"
-            }
-        }
+       #write-host "$($this.ImTheParent.Name) - $($fromSender.CallerName) : $($this.ImTheParent.bit) - $($this.Padding.By)" -ForegroundColor Green
+       # write-host "reseting" -ForegroundColor cyan
+        $this.ImTheParent.bit = 0
     }
     [void]WriteVerbose($fromSender){
-        $offsetBy = "VERBOSE: ".Length
-        $verboseOptionValue = [string]
+        $MyMsgRaw = $fromSender.Message
+
+        Write-Host "Step 1.0) Initializing" -ForegroundColor Cyan
+        $offsetByLength = ("VERBOSE: ".Length)
+        Write-Host "`$offsetBy = $offsetByLength" -ForegroundColor Cyan
+
+        $callerName = $fromSender.CallerName
+        $paddingBy = $this.Padding.By
+        $padWithString = $this.Padding.String
+        $isEnableMyVerbose = $this.Options.EnableMyVerbose
+        $paddingSymbole = $this.Padding.Symbole
+        $verboseOptionValue = [bool]
         $decorator = [string]
-        if(($this.Options.EnableMyVerbose) -eq $false){
-            #write-host "opting to not use the custom verbose feature"
-            #write-host "will inherit the verbose options from your session.."
 
+        
+        if(($isEnableMyVerbose) -eq $false){
             if($this.UserVerbosePreference -eq 'continue'){
-                #write-host "you have verbose option set to continue"
                 $verboseOptionValue = $true
-
             }elseif($this.UserVerbosePreference -eq 'SilentlyContinue'){
                 $verboseOptionValue = $false
             }
-            #Write-Verbose -Message $fromSender.Message -Verbose:$verboseOptionValue
-        }
-         # here is where the custom magic happens, assuming you the have verboseoption enabled
-        else{
-            #write-host "opting to use the custom verbose feature"
+        }else{
             if($this.UserVerbosePreference -eq 'continue'){
-                #write-host "you have verbose option set to continue"
                 $verboseOptionValue = $true
-
             }elseif($this.UserVerbosePreference -eq 'SilentlyContinue'){
                 $verboseOptionValue = $false
             }
-            
-            $decorator = switch($this.ImTheParent.bit){
+
+            # select the decorator to use
+            $Decorator = switch($this.ImTheParent.bit){
                 0 {
-                    $this.ImTheParent.Name = $fromSender.CallerName
+                    Write-Host "Step 2.0) The Parent Bit is set to 1 when first initalized" -ForegroundColor Cyan
+                    $this.ImTheParent.Name = $callerName
                     $this.ImTheParent.bit = 1
                     $this.Decorators.Parent
-                    $this.Tracker.LastDecorator = ' '
                     break
                 }
-
                 1 {
-                    #write-host 'something already called parent dibs'
-                    if(($fromSender.MsgType) -match "Parent"){
-                        $this.Decorators.Nested
-                        #$this.Padding.By = $this.Padding.By + 2
+                    if($fromSender.isFinal -eq $true){
+                        Write-Host "Step 2.3) This is the final message of the stack" -ForegroundColor cyan
+                        $this.Decorators.Final
+                    }else{
+                        if(($fromSender.MsgType) -match "Process"){
+                            Write-Host "Step 2.1) The msgtype is process and the parent bit is 1, the parent decorator is used" -ForegroundColor Cyan
+                            $this.Decorators.Process
+                            break
+                        }
                         break
                     }
-                    if(($fromSender.MsgType) -match "Process"){
-                        #$this.WhosTheParent(@{Name = ($fromSender.CallerName)})
-                        $this.Decorators.Process
-                        break
-                    }
-                    break
                 }
             }
-            if($fromSender.MsgType -ne "Process"){
-                $this.Padding.String = $($this.Padding.Symbole) * ($this.Padding.By)
-            }else {
-                $this.Padding.String = $($this.Padding.Symbole) * ($this.Padding.By)
-            }
-           
-            $this.Tracker.LastDecorator = $decorator
-            if($fromSender.isFinal){
-                $myMsg = "{0}{1}{2}" -f ($this.Padding.String),$decorator,"$($fromSender.Message)`n"
-                $this.Padding.By = $this.Padding.By - (($this.Tracker.LastDecorator).length -1)
-                $myMsg = "$($myMsg)$(' ' * $offsetby)$($($this.Padding.Symbole) * ($this.Padding.By))$($this.Decorators.Final)"
-            }else{
-                $this.Padding.By = $this.Padding.By + (($this.Tracker.LastDecorator).length -1)
-                $offsetBy = 0
-                $myMsg = "{0}{1}{2}" -f ($this.Padding.String),$decorator,$fromSender.Message
-            }
-            
-            #$myMsg = '{0}{1}{2}' -f ($this.Padding.String),$decorator,$fromSender.Message
-            Write-Verbose -Message $myMsg -Verbose:$verboseOptionValue
-            
-
+            $this.Padding.String = ($paddingSymbole * $paddingBy)
+            $padWithString = $this.Padding.String
+            $this.Tracker.LastDecorator = $Decorator
         }
+        # padding, decorator, and message
+        $MY_MESSAGE = "{0}{1}{2}" -f $padWithString,$Decorator,$MyMsgRaw
+        Write-Verbose -Message $MY_MESSAGE -Verbose:$verboseOptionValue
     }
 }
-
 
 $VerbosePreference = 'SilentlyContinue'
 $VerbosePreference = 'Continue'
 
+$Verbose.Padding.Symbole = " "
 $Verbose = [VerboseMessage]::new()
+$Verbose.Test3() 
+$Verbose.Test4()
 $Verbose.Test1()
 $Verbose.Test2()
 $Verbose.WriteVerbose(@{
@@ -201,14 +238,14 @@ $Verbose.Options.EnableMyVerbose = $true
 $Verbose.WriteVerbose(@{Message = "hi"})
 
 $Verbose.CallingNestedParent
-<#
--+| Getting Config
-..|--+ Doing Something
-..|--+ Doing something else
-..+-+| Loading Config
-.....|--+ Doing something
-.....|--+ doing something else
-..|--+ back to config
-..|--+ done
 
-#>
+
+#|-+[parent]
+#..|[process]
+#..|[process]
+#..|-+[nested]
+#....|[process]
+#....|[process]
+#..+-|[DONE]
+#..|[Process]
+#..|[DONE]

@@ -9,13 +9,12 @@
     "LogIdentity":[0,1],
     "DateTimeFormat":"yyyy-MM-dd HH:mm:ss",
     "Delimeter":",",
-    "OutputColor":"red",
     "CycleLogs":"true",
     "Interval":{
-        "seconds":10
+        "seconds":6
     },
     "Retention":{
-        "mostrecent": 5
+        "mostrecent": 10
     },
     "LogFilePath" :"./Test/Logs",
     "LogFileName":"Test.logs",

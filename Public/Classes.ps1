@@ -1,550 +1,653 @@
+# has snippet - imf
 $ErrorActionPreference = 'Stop'
-Function EvaluateOS{
-    if($IsWindows){
-        $OS_PARAMETERS = @{
-            OS_HOST = $env:COMPUTERNAME
-            OS_USER = $env:USERDOMAIN
-        }
-    }
-    if($IsMacOS){
-        $OS_PARAMETERS = @{
-            OS_HOST = "MAC_OS"
-            OS_USER = "MAC_USER"
-        }
-    }
-    $OS_PARAMETERS
-}
-$VerbosePreference = 'Continue'
-$VerbosePreference = 'SilentlyContinue'
+Function UTILITIES { . ./Private/Classes.ps1; [Utilities]::new() }
 
 class PSLogger{
-    $LogFormatTable = @{
-        Properties = @(
-            "Headings",
-            "EntryIdentity",
-            "LogIdentity",
-            "DateTimeFormat",
-            "Delimeter",
-            "OutputColor",
-            "CycleLogs",
-            "Interval",
-            "Retention",
-            "LogFilePath",
-            "LastDelimeterPath",
-            "LogFileName",
-            "TrackedValuesFile",
-            "EnableLogging"
-        )
-        Headings = @(
-            "UserName",
-            "DateTime",
-            "HostName",
-            "Message"
-        )
+    $Configuration = @{
+        Headings = @{
+            column_01 = 'LogID'
+            column_02 = 'UserName'
+            column_03 = 'DateTime'
+            column_04 = 'HostName'
+            column_05 = 'Message'
+        }
+        Identity = @{
+            seed        = 1
+            increment   = 1
+        }
+        DateTimeFormat      = "yyyy-MM-dd HH:mm:ss.fff"
+        CycleLogProperites = @{
+            EveryInterval = 'seconds'
+            IntervalValue = '24'
+        }
+        MaxLogFiles         = 1
+        MaxLogFileEntries   = 1
+        LogFileProperties   = @{
+            LogsFolderPath  = ''
+            Prefix           = ''
+            Extension       = ''
+            Delimeter       = ''
+        }
+        TotalLogFiles = 0
+        TotalLogEntries = 0
     }
-    $usePadding = $false
-    $pad        = 0
-    $padSymbole = [string]"."
-    $padLastDecorator = 2
-    $ConfigFilePath = [string]"./Private/Configuration.json"
-    $Configuration  = $this.GetConfiguration(@{Reload = $true})
-    $TrackedValues  = $this.GetTrackedValues(@{Reload = $true})
-
-    [psobject]ValidateConfiguration([hashtable]$fromSender){
-        $padstring = $null
-        if($this.UsePadding){
-            # this is a child process
-            $padadd = " " *$($this.pad)
-            $padstring = "$padadd|"
-        }
-        Write-Verbose -Message "$padstring-+[ValidateConfiguration]`n           $padstring" -verbose
-        Write-Verbose -Message "$padstring--+ running configuration validation" -Verbose
-        $allowedPropertiesList = $this.LogFormatTable.Properties
-        $RESULTS_TABLE  =   @{
-            isSuccessfull   =   [bool]
-            Data            =   [psobject]
-        }
-        $propertiesList = $fromSender.keys
-        foreach($property in ($propertiesList)){
-            if($allowedPropertiesList -notcontains $property){
-                $RESULTS_TABLE.isSuccessfull = $false
-            }else{
-                $RESULTS_TABLE.isSuccessfull = $true
-            }
-        }
-        if($RESULTS_TABLE.isSuccessfull -eq $false){
-            Write-Error -Message "[ValidateConfiguration]:: not all the properties in your configuration file are allowed" -Category "InvalidData" 
-        }
-        $RESULTS_TABLE.Data = $propertiesList
-        return $RESULTS_TABLE
-    }
-
-    [void]SetConfiguration([hashtable]$fromSender){
-        $padstring = $null
-        if($this.UsePadding){
-            # this is a child process
-            $padadd = " " *$($this.pad)
-            $padstring = "$padadd|"
-        }
-        Write-Verbose -Message "$padstring-+[SetConfiguration]`n           $padstring" -Verbose
-        Write-Verbose -Message "$padstring--+setting the configuration from disk to the class parameter" -Verbose
-        $this.Configuration = $fromSender
-    }
-
-    [void]SetTrackedValues([hashtable]$fromSender){
-        Write-Verbose -Message "[SetConfiguration]::setting the tracked values from disk to the class parameter..." -Verbose
-        $this.TrackedValues = $fromSender
-    }
-
-    [psobject]LoadConfiguration(){
-        $METHOD_NAME = "LoadConfiguration"
-        #------------------------------------------
-        $decorator = @{
-            head = "-+"
-            sub = "--+"
-        }
-        $padstring = [string]
-        if($this.UsePadding){
-            $padAdd = $this.padSymbole * $($this.pad)
-            $offset = ' ' * $this.padLastDecorator
-            $padString = "$padAdd|{0}"
-            $padstring = "$($padstring -f $decorator.head)[$METHOD_NAME]`n$(' '*$('VERBOSE: '.Length))$($offset)$($padAdd)|"
-            
-        }else{
-            $padstring = "{0}"
-            $padstring = $padstring -f $decorator.head
-        }
-        #------------------------------------------
-        Write-Verbose -Message "$padstring" -Verbose
-        #Write-Verbose -Message "$padstring--+reading configuration from disk..." -Verbose
-        $RESULTS_TABLE  =   @{
-            isSuccessfull   =   [bool]
-            Data            =   [psobject]
-        }
-        $preLoadedConfiguration = ((Get-Content $this.ConfigFilePath) | ConvertFrom-Json -AsHashtable)
-
-        $this.pad = $this.pad + $($decorator.head)
-        $RESULTS_TABLE = ($this.ValidateConfiguration($preLoadedConfiguration))
-        $this.pad = $this.pad - $($decorator.head)
-       
-        $this.pad = $this.pad + 1
-        $this.SetConfiguration($preLoadedConfiguration)
-        $this.pad = $this.pad - 1
-        return $RESULTS_TABLE
-    }
-
-    [void]LoadTrackedValues(){
-        Write-Verbose -Message "[LoadTrackedValues]::reading tracked values from disk..." -Verbose
-        $props = $this.GetConfiguration(@{Reload = $false})
+    $UTILITIES = (UTILITIES)
+    [void]CreateLogFile(){
+        $METHOD_NAME    = "CreateLogFile"
         
-        $preLoadedTrackedValues = (Get-Content $props.TrackedValuesFile) | ConvertFrom-Json -AsHashtable
-       
-        $this.SetTrackedValues($preLoadedTrackedValues)
+        $myExtension    =  $this.Configuration.LogFileProperties.Extension
+        $myPrefix        = $this.Configuration.LogFileProperties.Prefix
+        
+        $logFileList =  $this.GetLogFiles()
+        $mostRecent = $logFileList| 
+        Select-Object Name, CreationTime, @{Name='CreationTimeDT'; Expression={[DateTime]::Parse($_.CreationTime)} } | 
+        Sort-Object CreationTimeDT -Descending | Select-Object -First 1
+        $recentID = [int]
+        if($mostRecent -match '(test_)(.*)(.csv)'){
+          [int]$recentID = $Matches[2]
+        }else{
+            [int]$recentID = 0
+        }
+
+        $myLogNumber    =  ($recentID)+1
+        $logFileName    = '{0}{1}{2}' -f $myPrefix,$myLogNumber,$myExtension
+        $myLogsFolder   = $this.Configuration.LogFileProperties.LogsFolderPath
+        $logFilePath    = '{0}{1}' -f $myLogsFolder,$logFileName
+
+        try{
+            $this.UTILITIES.CreateItem(@{
+                ItemType        = 'file'
+                Path            = $logFilePath
+                WithFeedBack    = $false
+            })
+        }catch{
+            $msgError = "There is already a log file with the name '$logFileName' in directory '$myLogsFolder'."
+            Write-Error -Message $msgError; $Error[0]
+            return
+        }
+
+        $this.UTILITIES.DisplayMessage(@{
+            Message 	= "[$METHOD_NAME]:: Log folder created."
+            Type 		= "success"
+            Category 	= "feedback"
+        })
     }
+    [void]CreateLogFilesFolder([hashtable]$fromSender){
+        $METHOD_NAME        = "CreateLogFilesFolder"
+        $myMessage          = "[{0}]:: {1}"
+        $methodParamsAdded  = $this.UTILITIES.GetMethodParamstable(@{ MethodName = $METHOD_NAME })
+        
+        if($methodParamsAdded -eq 0){
+            $this.UTILITIES.DisplayMessage(@{
+                Message     = ($myMessage -f $METHOD_NAME,"Adding method required paramters to INPUT_PARAMS_TABLE")
+                Category    = "debug"
+                Type        = "debug"
+            })
 
-    [psobject]GetConfiguration([hashtable]$fromSender){
-        $METHOD_NAME = "GetConfiguration"
-        #------------------------------------------
-        $decorator = @{
-            head = "-+"
-            sub = "--+"
+            $this.UTILITIES.AddMethodParamstable(@{
+                MethodName  = $METHOD_NAME
+                KeysList    = @("LogFolderPath")
+            })
         }
-        $padstring = [string]
-        if($this.UsePadding){
-            $padAdd = $this.padSymbole * $($this.pad)
-            $offset = ' ' * $this.padLastDecorator
-            $padString = "$padAdd|{0}"
-            $padstring = "$($padstring -f $decorator.head)[$METHOD_NAME]`n$(' '*$('VERBOSE: '.Length))$($offset)$($padAdd)|"
-            
-        }else{
-            $padstring = "{0}"
-            $padstring = $padstring -f $decorator.head
-        }
-        #------------------------------------------
-        Write-Verbose -Message "$padstring" -Verbose
 
-        switch($fromSender.Reload){
-            $true {
-                if($this.UsePadding){
-                    $padAdd = $this.padSymbole * $($this.pad)
-                    $offset = ' ' * $this.padLastDecorator
-                    $padString = "$padAdd|{0}"
-                    $padstring = "$offset$($padstring -f $decorator.sub)loading configuration from disk"
-                    
-                }else{
-                    $padstring = "{0}"
-                    $padstring = $padstring -f $decorator.sub
-                }
-                Write-Verbose -Message "$padstring" -Verbose
+        $this.UTILITIES.HashtableValidation(@{
+            MethodName          = $METHOD_NAME
+            UserInputHashtable  = $fromSender
+        })
 
-                $this.pad = $this.pad + $($decorator.sub)
-                $this.LoadConfiguration()
-                $this.pad = $this.pad - $($decorator.sub)
-            }
-            default {
-                Write-Verbose -Message "getting configuration from class parameter(s)..." -Verbose
-            }
+        try{
+            $this.UTILITIES.CreateItem(@{
+                ItemType        = 'Directory'
+                Path            = $fromSender.LogFolderPath
+                WithFeedBack    = $false
+            })
+        }catch{
+            $this.UTILITIES.DisplayMessage(@{
+                Message 	= "[$METHOD_NAME]:: Log folder already exists created."
+                Type 		= "informational"
+                Category 	= "feedback"
+            })
+            return
         }
-        return $this.Configuration
+
+        $this.UTILITIES.DisplayMessage(@{
+            Message 	= "[$METHOD_NAME]:: Log folder created."
+            Type 		= "success"
+            Category 	= "feedback"
+        })
     }
+    [void]SetTotalLogFiles([hashtable]$fromSender){
+        # adding the methods params to INPUT_METHOD_PARAMS_TABLE allows you to handle keys are
+        # correctly provided
+        $METHOD_NAME        = "SetTotalLogFiles"
+        $myMessage          = "[{0}]:: {1}"
+        $methodParamsAdded  = $this.UTILITIES.GetMethodParamstable(@{ MethodName = $METHOD_NAME })
+        
+        if($methodParamsAdded -eq 0){
+            $this.UTILITIES.DisplayMessage(@{
+                Message     = ($myMessage -f $METHOD_NAME,"Adding method required paramters to INPUT_PARAMS_TABLE")
+                Category    = "debug"
+                Type        = "debug"
+            })
 
-    [psobject]GetTrackedValues([hashtable]$fromSender){
-        switch($fromSender.Reload){
-            $true {
-                Write-Verbose -Message "[GetTrackedValues]::loading tracked values from disk..." -Verbose
-                $this.LoadTrackedValues()
-            }
-            default{
-                Write-Verbose -Message "[GetTrackedValues]::getting tracked values from class parameter(s)..." -Verbose
-            }
+            $this.UTILITIES.AddMethodParamstable(@{
+                MethodName  = $METHOD_NAME
+                KeysList    = @("Add")
+            })
         }
-        return $this.TrackedValues
+
+        $this.UTILITIES.HashtableValidation(@{
+            MethodName          = $METHOD_NAME
+            UserInputHashtable  = $fromSender
+        })
+    
+        $currentTotalLogFiles   = $this.GetLogFiles().count
+        $myMaxLogValue          = $this.Configuration.MaxLogFiles
+        $currentTotalLogFiles   = ($currentTotalLogFiles) + ($fromSender.Add)
+        if($currentTotalLogFiles -gt $myMaxLogValue){
+            $msgError = "[$METHOD_NAME]:: Cannot create another log file, max limit of '$MyMaxLogValue' has been reached."
+            Write-Error -Message $msgError; $Error[0]
+            return
+        }
+
+        $this.Configuration.TotalLogFiles = $currentTotalLogFiles
     }
+    [void]SetMaxLogFileEntries([hashtable]$fromSender){
+        # adding the methods params to INPUT_METHOD_PARAMS_TABLE allows you to handle keys are
+        # correctly provided
+        $METHOD_NAME        = "SetMaxLogFileEntries"
+        $myMessage          = "[{0}]:: {1}"
+        $methodParamsAdded  = $this.UTILITIES.GetMethodParamstable(@{ MethodName = $METHOD_NAME })
+        
+        if($methodParamsAdded -eq 0){
+            $this.UTILITIES.DisplayMessage(@{
+                Message     = ($myMessage -f $METHOD_NAME,"Adding method required paramters to INPUT_PARAMS_TABLE")
+                Category    = "debug"
+                Type        = "debug"
+            })
 
-    [psobject]RetentionPolicy([hashtable]$fromSender){
-        Write-Verbose -Message "-+ [RetentionPolicy]" -Verbose
-        $RESULTS_TABLE  =   @{
-            isSuccessfull   = [bool]
-            Data            = @{}
+            $this.UTILITIES.AddMethodParamstable(@{
+                MethodName  = $METHOD_NAME
+                KeysList    = @("MaxLogFileEntries")
+            })
         }
 
-        $RESULTS_TABLE.Data.Add("CanCreateNewFile",$true)
-        if($fromSender.Reload){
-            Write-Verbose -Message "--+ Reloading configuration" -Verbose
-        }else{
-            Write-Verbose -Message "--+ Not realoding configuration" -Verbose
-        }
-        $config         = $this.GetConfiguration($fromSender)
-        $logFileList    = (Get-ChildItem -Path  $config.LogFilePath -Filter "*$($config.LogFileName)") 
-        $retentionList  = $logFileList | Sort-Object -Property  "LastWriteTime" -Descending | Select-Object -First ($config.Retention.mostrecent -1)
-
-        $mostRecentLog              =   ($this.GetCurrentLogFile(@{Reload = $false}))
-        [string]$myInterval         =   $config.Interval.keys
-        [string]$myIntervalValue    =   $config.Interval.values
-
-        $DateTimeCommandString  = ('(Get-Date).Add{0}(-{1})' -f ($myInterval),($myIntervalValue))
-        $scriptBlock            = [scriptblock]::Create($DateTimeCommandString)
-        $DateTimeOffset         = Invoke-Command -ScriptBlock $scriptBlock
-
-        if(($mostRecentLog.Data.CreationTime) -lt $DateTimeOffset){
-            Write-Verbose -Message "--+ Per the retention policy, purging some files..." -Verbose
-            $logFileList | Select-Object -Property * | Where-Object {$retentionList.Name -notcontains $_.Name} | Remove-Item
-            
-       }else{
-            Write-Verbose -Message "[RetentionPolicy]:: per the retention policy, no new files can be created..." -Verbose
-            $RESULTS_TABLE.Data.GetConfiguration = $false
-       }
-       return $RESULTS_TABLE
-    }
-
-    [psobject]GetCurrentLogFile($fromSender){
-        Write-Verbose -Message "-+ [GetCurrentLogFile]" -Verbose
-        $RESULTS_TABLE  =   @{
-            isSuccessfull   = [bool]
-            Data            = [psobject]
+        $this.UTILITIES.HashtableValidation(@{
+            MethodName          = $METHOD_NAME
+            UserInputHashtable  = $fromSender
+        })
+    
+        $currentMaxLogFileEntries   = $this.Configuration.MaxLogFileEntries
+        $newMaxLogFileEntries       = $fromSender.MaxLogFileEntries
+        $rangeLimit                 = 1..10000
+ 
+        if(-not($newMaxLogFileEntries.GetType() -eq [int])){
+            $msgError = "Max limit has to be of type integer"
+            Write-Error -Message $msgError; $Error[0]
+            return
         }
 
-        if($fromSender.Reload){
-            Write-Verbose -Message "--+ Reloading configuration" -Verbose
-        }else{
-            Write-Verbose -Message "--+ Not Realoading configuration" -Verbose
-        }
-
-        $config = $this.GetConfiguration($fromSender)
-        if( -not (Test-Path -Path "$($config.LogFilePath)")){
-            $RESULTS_TABLE.isSuccessfull = $false
-            Write-Error -Message "The path in your configuration file '$($config.LogFilePath)' is not reachable"
-        }else{
-            Write-Verbose -Message "--+ The path in your configuration file '$($config.LogFilePath)' is valid" -Verbose
-        }
-
-        $logFileList = (Get-ChildItem -Path  $config.LogFilePath -Filter "*$($config.LogFileName)")
-        if($null -eq $logFileList){
-            Write-Verbose -Message "--+ The log file location is empty" -Verbose
-            $RESULTS_TABLE.isSuccessfull = $true
-            $RESULTS_TABLE.Data = @{
-                isNull          = $true
-                mostRecentLog   = $null
-            }
-        }else{
-            Write-Verbose -Message "--+ The log file location has '$($logFileList.count)' log files" -Verbose
-            $RESULTS_TABLE.isSuccessfull = $true
-            $RESULTS_TABLE.Data = @{
-                isNull          = $false
-                mostRecentLog   = $logFileList | Sort-Object -Property  LastWriteTime -Descending | Select-Object -First 1
-            }
-        }
-        return $RESULTS_TABLE
-    }
-
-    [psobject]CreateLogFile([hashtable]$fromSender){
-        Clear-Host
-        Write-Verbose -Message "-+ [CreateLogFile]" -Verbose
-
-        $config     = $this.GetConfiguration($fromSender)
-        $trackedVal = $this.GetTrackedValues($fromSender)
-        $canCreateNewFile = $true
-
-        # check to see if we can create a log file or not
-        if(($this.GetCurrentLogFile($fromSender)).Data.isNull){
-            Write-Verbose -Message "--+ No current log file present in $($config.LogFilePath), resettings LogFileID" -Verbose
-            $resetTrackedValues = [ordered]@{
-                LogFileID       = $config.LogIdentity[0]
-                LastDelimeter   = $config.Delimeter
-            }
-            $resetTrackedValues = $resetTrackedValues  | ConvertTo-Json
-            Set-Content -Path $config.TrackedValuesFile -Value $resetTrackedValues
-        }else{
-            Write-Verbose -Message "--+ Checking the retention values" -Verbose
-            $canCreateNewFile = $this.RetentionPolicy(@{Reload = $true}).Data.CanCreateNewFile
+        if($newMaxLogFileEntries -lt $rangeLimit[0]){
+            $msgError = "Max limit cannot be less than '$($rangeLimit[0])'"
+            Write-Error -Message $msgError; $Error[0]
+            return
         }
         
-        $preFileName = "{0}_$(($config.LogFileName))"
-        $posFileName = [string]
-        $finalName = [string]
+        if($newMaxLogFileEntries -gt $rangeLimit[-1]){
+            $msgError = "Max limit cannot be greater than '$($rangeLimit[-1])'"
+            Write-Error -Message $msgError; $Error[0]
+            return
+        }
 
-        $lastFileID = ($trackedVal).LogFileID
+        if($null -eq $newMaxLogFileEntries){
+            $msgError = "Max limit cannot be 'NULL'"
+            Write-Error -Message $msgError; $Error[0]
+            return
+        }
 
-        if($config.CycleLogs -eq "false"){
-            Write-Verbose -Message "--+ Cycling logs is 'disabled'" -Verbose
-            $posFileName = $preFileName -f $lastFileID
-            $finalName = "$($config.LogFilePath)/$($posFileName)"
+        if($currentMaxLogFileEntries -ne $newMaxLogFileEntries){
+            $this.UTILITIES.DisplayMessage(@{
+                Message 	= ($myMessage -f $METHOD_NAME,"Max entry limit updated to '$newMaxLogFileEntries'")
+                Type 		= "success"
+                Category 	= "feedback"
+            })
+            $this.Configuration.MaxLogFileEntries = $newMaxLogFileEntries
+            return
+        }
 
-            if(-not (Test-Path -Path $finalName)){
-                New-Item -Path $finalName -ItemType "File"
-            }else{
-                Write-host "log file $($finalName) already exists"
+        $this.UTILITIES.DisplayMessage(@{
+            Message 	= ($myMessage -f $METHOD_NAME,"Max entry limit was not updated since the current limit is the same as the new max limit.")
+            Type 		= "debug"
+            Category 	= "debug"
+        })
+    }
+    [void]SetMaxLogFiles([hashtable]$fromSender){
+        # adding the methods params to INPUT_METHOD_PARAMS_TABLE allows you to handle keys are
+        # correctly provided
+        $METHOD_NAME        = "SetMaxLogFiles"
+        $myMessage          = "[{0}]:: {1}"
+        $methodParamsAdded  = $this.UTILITIES.GetMethodParamstable(@{ MethodName = $METHOD_NAME })
+        
+        if($methodParamsAdded -eq 0){
+            $this.UTILITIES.DisplayMessage(@{
+                Message     = ($myMessage -f $METHOD_NAME,"Adding method required paramters to INPUT_PARAMS_TABLE")
+                Category    = "debug"
+                Type        = "debug"
+            })
+
+            $this.UTILITIES.AddMethodParamstable(@{
+                MethodName  = $METHOD_NAME
+                KeysList    = @("MaxLogFiles")
+            })
+        }
+
+        $this.UTILITIES.HashtableValidation(@{
+            MethodName          = $METHOD_NAME
+            UserInputHashtable  = $fromSender
+        })
+    
+        $currentMaxLogFiles = $this.Configuration.MaxLogFiles
+        $newMaxLogFiles     = $fromSender.MaxLogFiles
+        $rangeLimit         = 1..100
+ 
+        if(-not($newMaxLogFiles.GetType() -eq [int])){
+            $msgError = "Max limit has to be of type integer"
+            Write-Error -Message $msgError; $Error[0]
+            return
+        }
+
+        if($newMaxLogFiles -lt $rangeLimit[0]){
+            $msgError = "Max limit cannot be less than '$($rangeLimit[0])'"
+            Write-Error -Message $msgError; $Error[0]
+            return
+        }
+        
+        if($newMaxLogFiles -gt $rangeLimit[-1]){
+            $msgError = "Max limit cannot be greater than '$($rangeLimit[-1])'"
+            Write-Error -Message $msgError; $Error[0]
+            return
+        }
+
+        if($null -eq $newMaxLogFiles){
+            $msgError = "Max limit cannot be 'NULL'"
+            Write-Error -Message $msgError; $Error[0]
+            return
+        }
+
+        if($currentMaxLogFiles -ne $newMaxLogFiles){
+            $this.UTILITIES.DisplayMessage(@{
+                Message 	= ($myMessage -f $METHOD_NAME,"Max limit updated to '$newMaxLogFiles'")
+                Type 		= "success"
+                Category 	= "feedback"
+            })
+            $this.Configuration.MaxLogFiles = $newMaxLogFiles
+            return
+        }
+
+        $this.UTILITIES.DisplayMessage(@{
+            Message 	= ($myMessage -f $METHOD_NAME,"Max limit was not updated since the current limit is the same as the new max limit.")
+            Type 		= "debug"
+            Category 	= "debug"
+        })
+    }
+    [void]SetLogFileDelimeter([hashtable]$fromSender){
+        # adding the methods params to INPUT_METHOD_PARAMS_TABLE allows you to handle keys are
+        # correctly provided
+        $METHOD_NAME        = "SetLogFileDelimeter"
+        $myMessage          = "[{0}]:: {1}"
+        $methodParamsAdded  = $this.UTILITIES.GetMethodParamstable(@{ MethodName = $METHOD_NAME })
+        
+        if($methodParamsAdded -eq 0){
+            $this.UTILITIES.DisplayMessage(@{
+                Message     = ($myMessage -f $METHOD_NAME,"Adding method required paramters to INPUT_PARAMS_TABLE")
+                Category    = "debug"
+                Type        = "debug"
+            })
+
+            $this.UTILITIES.AddMethodParamstable(@{
+                MethodName  = $METHOD_NAME
+                KeysList    = @("Delimeter")
+            })
+        }
+
+        $this.UTILITIES.HashtableValidation(@{
+            MethodName          = $METHOD_NAME
+            UserInputHashtable  = $fromSender
+        })
+    
+        $currentDelimeter   = $this.Configuration.LogFileProperties.Delimeter
+        $newDelimeter       = $fromSender.Delimeter
+        $DelimeterList      = @("|",',')
+
+        if($newDelimeter.Length -eq 0){
+            $msgError = "Delimeter cannot be of length '0'"
+            Write-Error -Message $msgError; $Error[0]
+            return
+        }
+
+        if($null -eq $newDelimeter){
+            $msgError = "Delimeter cannot be 'NULL'"
+            Write-Error -Message $msgError; $Error[0]
+            return
+        }
+
+        if($DelimeterList -notcontains  $newDelimeter){
+            $msgError = "Delimeter can only be '|', or ','"
+            Write-Error -Message $msgError; $Error[0]
+            return     
+        }
+
+        if($currentDelimeter -ne $newDelimeter){
+            $this.UTILITIES.DisplayMessage(@{
+                Message 	= ($myMessage -f $METHOD_NAME,"Delimeter updated to '$newDelimeter'")
+                Type 		= "success"
+                Category 	= "feedback"
+            })
+            $this.Configuration.LogFileProperties.Delimeter = $newDelimeter
+            return
+        }
+
+        $this.UTILITIES.DisplayMessage(@{
+            Message 	= ($myMessage -f $METHOD_NAME,"Delimeter was not updated since the current delimeter is the same as the new delimeter.")
+            Type 		= "debug"
+            Category 	= "debug"
+        })   
+    }  
+    [void]SetLogFileExtension([hashtable]$fromSender){
+        # adding the methods params to INPUT_METHOD_PARAMS_TABLE allows you to handle keys are
+        # correctly provided
+        $METHOD_NAME        = "SetLogFileExtension"
+        $myMessage          = "[{0}]:: {1}"
+        $methodParamsAdded  = $this.UTILITIES.GetMethodParamstable(@{ MethodName = $METHOD_NAME })
+        
+        if($methodParamsAdded -eq 0){
+            $this.UTILITIES.DisplayMessage(@{
+                Message     = ($myMessage -f $METHOD_NAME,"Adding method required paramters to INPUT_PARAMS_TABLE")
+                Category    = "debug"
+                Type        = "debug"
+            })
+
+            $this.UTILITIES.AddMethodParamstable(@{
+                MethodName  = $METHOD_NAME
+                KeysList    = @("Extension")
+            })
+        }
+
+        $this.UTILITIES.HashtableValidation(@{
+            MethodName          = $METHOD_NAME
+            UserInputHashtable  = $fromSender
+        })
+    
+        $currentExtension   = $this.Configuration.LogFileProperties.Extension
+        $newExtension       = $fromSender.Extension
+
+        $extensionPattern   = "^\.[a-zA-Z]{3}$"
+        if(-not($newExtension -match $extensionPattern)){
+            $msgError = "Invalid extension provided, make sure you have a period '.' followed by 3 characters"
+            Write-Error -Message $msgError; $Error[0]
+            return
+        }
+
+        if($currentExtension -ne $newExtension){
+            $this.UTILITIES.DisplayMessage(@{
+                Message 	= ($myMessage -f $METHOD_NAME," Log file extension update to '$newExtension'")
+                Type 		= "success"
+                Category 	= "feedback"
+            })
+            $this.Configuration.LogFileProperties.Extension = $newExtension
+            return
+        }
+
+        $this.UTILITIES.DisplayMessage(@{
+            Message 	= ($myMessage -f $METHOD_NAME,"Extension was not updated since the current extension is the same as the new extension.")
+            Type 		= "debug"
+            Category 	= "debug"
+        })    
+    }  
+    [void]SetLogsFolderPath([hashtable]$fromSender){
+        # adding the methods params to INPUT_METHOD_PARAMS_TABLE allows you to handle keys are
+        # correctly provided
+        $METHOD_NAME        = "SetLogsFolderPath"
+        $myMessage          = "[{0}]:: {1}"
+        $methodParamsAdded  = $this.UTILITIES.GetMethodParamstable(@{ MethodName = $METHOD_NAME })
+        
+        if($methodParamsAdded -eq 0){
+            $this.UTILITIES.DisplayMessage(@{
+                Message     = ($myMessage -f $METHOD_NAME,"Adding method required paramters to INPUT_PARAMS_TABLE")
+                Category    = "debug"
+                Type        = "debug"
+            })
+
+            $this.UTILITIES.AddMethodParamstable(@{
+                MethodName  = $METHOD_NAME
+                KeysList    = @("LogFolderPath")
+            })
+        }
+
+        $this.UTILITIES.HashtableValidation(@{
+            MethodName          = $METHOD_NAME
+            UserInputHashtable  = $fromSender
+        })
+    
+        $currentPath    = $this.Configuration.LogFileProperties.LogsFolderPath
+        $newPath        = $fromSender.LogFolderPath
+
+        if($currentPath -ne $newPath){
+            $this.UTILITIES.DisplayMessage(@{
+                Message 	= ($myMessage -f $METHOD_NAME," Log folder path update to '$($fromSender.LogFolderPath)'")
+                Type 		= "success"
+                Category 	= "feedback"
+            })
+            $this.Configuration.LogFileProperties.LogsFolderPath = $newPath
+            return
+        }
+
+        $this.UTILITIES.DisplayMessage(@{
+            Message 	= ($myMessage -f $METHOD_NAME,"Path was not updated since the current path is the same as the new path.")
+            Type 		= "debug"
+            Category 	= "debug"
+        })    
+    }
+    [void]SetLogFilePrefix([hashtable]$fromSender){
+        # adding the methods params to INPUT_METHOD_PARAMS_TABLE allows you to handle keys are
+        # correctly provided
+        $METHOD_NAME        = "SetLogFilePrefix"
+        $myMessage          = "[{0}]:: {1}"
+        $methodParamsAdded  = $this.UTILITIES.GetMethodParamstable(@{ MethodName = $METHOD_NAME })
+        
+        if($methodParamsAdded -eq 0){
+            $this.UTILITIES.DisplayMessage(@{
+                Message     = ($myMessage -f $METHOD_NAME,"Adding method required paramters to INPUT_PARAMS_TABLE")
+                Category    = "debug"
+                Type        = "debug"
+            })
+
+            $this.UTILITIES.AddMethodParamstable(@{
+                MethodName  = $METHOD_NAME
+                KeysList    = @("LogFilePrefix")
+            })
+        }
+
+        $currentPrefix  = $this.Configuration.LogFileProperties.Prefix
+        $newPrefix      = $fromSender.LogFilePrefix
+
+        $prefixPatter = "^.+_$"
+        if(-not($newPrefix -match $prefixPatter)){
+            $msgError = "Prefix does not match the set pattern, make sure your prefix has leading string of any length with a trailing '_'."
+            Write-Error -Message $msgError; $Error[0]
+            return
+        }
+        
+        if($currentPrefix -ne $newPrefix){
+            $this.UTILITIES.DisplayMessage(@{
+                Message 	= ($myMessage -f $METHOD_NAME,"Prefix updated to '$($fromSender.LogFilePrefix)'")
+                Type 		= "success"
+                Category 	= "feedback"
+            })
+            $this.Configuration.LogFileProperties.Prefix = $fromSender.LogFilePrefix
+            return
+        }
+
+        $this.UTILITIES.DisplayMessage(@{
+            Message 	= ($myMessage -f $METHOD_NAME,"Prefix was not updated since the current prefix is the same as the new prefix.")
+            Type 		= "debug"
+            Category 	= "debug"
+        })      
+    }
+    [void]Initalize([hashtable]$fromSender){
+        $METHOD_NAME = 'Initalize'
+        $methodParamsAdded = $this.UTILITIES.GetMethodParamstable(@{ MethodName = $METHOD_NAME })
+        $myMessage = '[{0}]:: {1}'
+        if($methodParamsAdded -eq 0){
+            $this.UTILITIES.DisplayMessage(@{
+                Message     = "Methods will be added to INPUT_METHOD_PARAMS_TABLE."
+                Category    = "debug"
+                Type        = "debug"
+            })
+
+            $myMethodParams = @{
+                MethodName  = "Initalize"
+                KeysList    = @(
+                    "MaxLogFileEntries",
+                    "MaxLogFiles",
+                    "Delimeter",
+                    "Extension",
+                    "LogFilePrefix",
+                    "LogFolderPath",
+                    #-----------------------#
+                    "CacheSettingsFolderPath",      #= './CacheFolder'
+                    "CacheFileName",                # = '/LoggingCache.txt'
+                    "ConfigurationLabel"             # = "LoggingCache"
+                )
             }
+            $this.UTILITIES.AddMethodParamstable($myMethodParams)
+        }
+
+        # check: if there is configurations saved
+        $myConfiguration = $null
+        $configSetFromCache = [bool]
+        if(Test-Path -path "$($fromSender.CacheSettingsFolderPath)$($fromSender.CacheFileName)"){
+            $this.UTILITIES.DisplayMessage(@{
+                Message 	= "[$METHOD_NAME]:: Cache Exists already, using that"
+                Type 		= "informational"
+                Category 	= "feedback"
+            })  
+           $myConfiguration =  $this.UTILITIES.ReadCacheConfiguration(@{
+                Configuration    = $this.Configuration
+                FolderPath      = $fromSender.CacheSettingsFolderPath
+                FileName        = $fromSender.CacheFileName
+                ConfigurationLabel = $fromSender.ConfigurationLabel
+            })
+            $this.Configuration = $myConfiguration
+            $configSetFromCache = $true
         }else{
-            Write-Verbose -Message "--+ Cycling logs is 'enabled'" -Verbose
-            $currentFileID = $lastFileID + $config.LogIdentity[1]
-            $posFileName = $preFileName -f $currentFileID
-            $finalName = "$($config.LogFilePath)/$($posFileName)"
+            $configSetFromCache = $false
+        }
 
-            if(-not (Test-Path -Path $finalName)){
-                if($canCreateNewFile){
-                    New-Item -Path $finalName -ItemType "File"
-                    $trackedVal.LogFileID = $currentFileID
-                    $trackedVal = $trackedVal | ConvertTo-Json
-                    Set-Content -Path $config.TrackedValuesFile -Value $trackedVal
-                }
-                else{
-                    Write-Verbose -Message "--+ Can't create a new log file, the most recent log file is still within the retention period" -Verbose
-                }
-            }else{
-                Write-Verbose -Message "--+ file already exists" -Verbose
+        if($configSetFromCache -eq $true){
+            $this.UTILITIES.DisplayMessage(@{
+                Message 	= ($myMessage -f $METHOD_NAME,"Configuration set from cache.")
+                Type 		= "debug"
+                Category 	= "debug"
+            })   
+        }
 
+        $this.SetMaxLogFileEntries(@{MaxLogFileEntries = $fromSender.MaxLogFileEntries})
+        $this.SetMaxLogFiles(@{MaxLogFiles = $fromSender.MaxLogFiles})
+        $this.SetLogFileDelimeter(@{Delimeter = $fromSender.Delimeter})
+        $this.SetLogFileExtension(@{Extension = $fromSender.Extension})
+        $this.SetLogFilePrefix(@{LogFilePrefix = $fromSender.LogFilePrefix})
+        $this.SetLogsFolderPath(@{LogFolderPath = $fromSender.LogFolderPath})
+
+        $this.CreateLogFilesFolder(@{LogFolderPath = $fromSender.LogFolderPath})
+        $this.SetTotalLogFiles(@{Add = 1})
+        $this.CreateLogFile()
+
+        $myConfiguration = $this.Configuration
+        $this.UTILITIES.CacheConfiguration(@{
+            Configuration       = $myConfiguration
+            FolderPath         = $fromSender.CacheSettingsFolderPath
+            FileName           = $fromSender.CacheFileName
+            ConfigurationLabel  = $fromSender.ConfigurationLabel
+        })
+    }
+    [psobject]GetLogFiles(){
+        $myPrefix = $this.Configuration.LogFileProperties.Prefix
+        $myPattern = "$($myPrefix)*"
+
+        $myLogFolder = $this.Configuration.LogFileProperties.LogsFolderPath
+
+        $matchingFiles = Get-ChildItem -Path $myLogFolder -Filter "$myPattern"  -File
+        return $matchingFiles
+    }
+    [psobject]GetOldestLog(){
+        $myLogFiles = $this.GetLogFiles()
+        $lastLogFile = $myLogFiles| 
+        Select-Object Name, CreationTime, @{Name='CreationTimeDT'; Expression={[DateTime]::Parse($_.CreationTime)} } | 
+        Sort-Object CreationTimeDT -Descending | Select-Object -Last 1
+        return $lastLogFile
+    }
+    [psobject]GetLatestLog(){
+        $myLogFiles = $this.GetLogFiles()
+        $lastLogFile = $myLogFiles| 
+        Select-Object Name, CreationTime, @{Name='CreationTimeDT'; Expression={[DateTime]::Parse($_.CreationTime)} } | 
+        Sort-Object CreationTimeDT -Descending | Select-Object -First 1
+        return $lastLogFile
+    }
+    [void]RemoveAllLogs([hashtable]$fromSender){
+        # adding the methods params to INPUT_METHOD_PARAMS_TABLE allows you to handle keys are
+        # correctly provided
+        $myLogFolder        = $this.Configuration.LogFileProperties.LogsFolderPath
+        $myPrefix            = $this.Configuration.LogFileProperties.Prefix
+        Get-ChildItem -Path $myLogFolder -Filter "$myPrefix*"  -File | ForEach-Object { Remove-Item $_.FullName -Force }
+
+        $myConfigurationProperties = $this.UTILITIES.GetUtilitySettingsTable(@{UtilityName = 'Configuration'})
+        $myCache = $myConfigurationProperties.($fromSender.ConfigurationLabel)
+        $myCacheProperties = (get-content -path $myCache.FilePath) | ConvertFrom-Json
+        
+        $myCacheProperties.TotalLogEntries  = 0
+        $myCacheProperties.TotalLogFiles    = 0
+        $myNewJson = $myCacheProperties | ConvertTo-Json
+        Set-Content -path ($myCache.FilePath) -Value $myNewJson
+        $this.Configuration = $myCacheProperties
+    }
+    [psobject]CheckInterval(){
+        $myCycleLogProperties = $this.Configuration.CycleLogProperites
+        $myInterval = $myCycleLogProperties.EveryInterval
+        $myIntervalValue = $myCycleLogProperties.IntervalValue
+
+        $DateTimeOffset = switch($myInterval){
+            'hours'{
+                (Get-Date).AddHours(-$myIntervalValue)
+            }
+            'seconds'{
+                (Get-Date).AddSeconds(-$myIntervalValue)
+            }
+            'minutes'{
+                (Get-Date).AddMinutes(-$myIntervalValue)
+            }
+            'days'{
+                (Get-Date).AddDays(-$myIntervalValue)
             }
         }
-        return $true
-    }
-
-    [psobject]GetHeadingProperties($logThis){
-        $props = $this.GetConfiguration(@{Reload = $false})
-        
-        $LogMessageList = @()
-        $LogMessageOptionsTable = [ordered]@{
-            UserName    =  (EvaluateOS).OS_USER
-            DateTime    = (Get-Date).ToString($Props.DateTimeFormat)
-            Message     = $logThis
-            HostName    = (EvaluateOS).OS_HOST
-        }
-        foreach($heading in $props.Headings){
-           $LogMessageList += $LogMessageOptionsTable[$heading]
-        }
-        return $LogMessageList
-    }
-
-    [void]ClearAllLogs(){
-        Write-Verbose -Message "-+ [ClearAllLogs]" -Verbose
-        $config = $this.GetConfiguration(@{Reaload = $true})
-        $logFileList = Get-ChildItem -path ($config.LogFilePath)  
-        if($logFileList.Count -eq 0){
-            Write-Verbose -Message "--+ No logs exists to remove" -Verbose
-        }else{
-            Write-Verbose -Message "--+ Removing '$($logFileList.count)' log files" -Verbose
-            $logFileList | Remove-Item -Force
-        }
-    }
-    [void]ResetTrackedValues([hashtable]$fromSender){
-        $METHOD_NAME = "ResetTrackedValue"
-        #------------------------------------------
-        $decorator = @{
-            head = "-+"
-            sub = "--+"
-        }
-        $padstring = [string]
-        if($this.UsePadding){
-            $padAdd = $this.padSymbole * $($this.pad)
-            $offset = ' ' * $this.padLastDecorator
-            $padString = "$padAdd|{0}"
-            $padstring = "$($padstring -f $decorator.head)[$METHOD_NAME]`n$(' '*$('VERBOSE: '.Length))$($offset)$($padAdd)|"
-            
-        }else{
-            $padstring = "{0}"
-            $padstring = $padstring -f $decorator.head
-        }
-        
-        #------------------------------------------
-        Write-Verbose -Message "$padstring" -Verbose
-
-        $METHOD_PARAMS_LIST = @(
-            "Reload",
-            "UseDefaults"
-        )
-
-        $methodParamsCopy = $METHOD_PARAMS_LIST
-        foreach($userParam in $fromSender.Keys){
-            if($methodParamsCopy -contains $userParam){
-                $methodParamsCopy = $methodParamsCopy | Where-Object {$_ -ne $userParam}
-            }
-        }
-
-        if($methodParamsCopy.count -gt 0){
-            Write-Error -Message "[$METHOD_NAME] - missing the following parameter (s): '$($methodParamsCopy -join ("', '"))'" -Category "NotSpecified"
-        }
-        
-        $DEFAUL_TRACKED_VALUES_TABLE = [ordered]@{
-            LogFileID = 0
-            LastDelimeter = ","
-        }
-        
-        $this.Pad = $this.Pad + $this.padLastDecorator
-        $config = $this.GetConfiguration($fromSender)
-        $this.Pad = $this.Pad - $this.padLastDecorator
-        
-
-        if( -not (Test-Path -Path $($config.TrackedValuesFile))){
-            Write-Error -Message "--+the path for tracked values '$($config.TrackedValuesFile)' is not valid" -Category "ObjectNotFound"
-        }else{
-            Write-Verbose -Message "--+ The path for tracked values '$($config.TrackedValuesFile)' is valid" -Verbose
-        }
-
-        if($fromSender.UseDefaults){
-            Set-Content -Path $config.TrackedValuesFile -Value ($DEFAUL_TRACKED_VALUES_TABLE | ConvertTo-Json)
-            Write-Verbose -Message "--+ Reset tracked values with the defaults" -Verbose
-
-        }else{
-            Set-Content -Path $config.TrackedValuesFile -Value ($DEFAUL_TRACKED_VALUES_TABLE | ConvertTo-Json)
-            Write-Verbose -Message "--+ Reset tracked values with the values in the configuration file '$($config.TrackedValuesFile)'" -Verbose
-        }
-
-    }
-    [psobject]GetSeedProperties([hashtable]$fromSender){
-        Write-Verbose -Message "-+ [GetSeedProperties]" -Verbose
-        $RESULTS_TABLE  =   @{
-            isSuccessfull   =   [bool]
-            Data            =   [psobject]
-        }
-
-        if($fromSender.Reload){
-            Write-Verbose -Message "--+ Reload configuration: 'true'" -Verbose
-        }else{
-            Write-Verbose -Message "--+ Reload configuration: 'false'" -Verbose
-        }
-        $config = $this.GetConfiguration($fromSender)
-        $RESULTS_TABLE.Data = [ordered]@{
-            Seedof      = $config.EntryIdentity[0]
-            Incrementof = $config.EntryIdentity[1]
-        }
-        return $RESULTS_TABLE
-    }
-
-    [psobject]GetLastLogEntry(){
-        $LogFilePath = ($this.GetCurrentLogFile()).mostRecentLog
-        return Get-Content -Tail 1 -Path $LogFilePath
-    }
-
-    [void]LogThis([string]$logThis){
-        $props          = $this.GetTrackedValues(@{Reaload = $true})
-        $config_props   = $this.GetConfiguration(@{Reload = $true})
-        $Delimenter     = $config_props.Delimeter
-
-        Write-Verbose -Message "-+ [LogThis]" -Verbose
-        Write-Verbose -Message "--+ LastDelimeter: '$($props.LastDelimeter)'" -Verbose
-        Write-Verbose -Message "--+ LogFileID: '$($props.LogFileID)'`n" -Verbose
-        
-        $SeedProps  = $this.GetSeedProperties(@{Reload = $false})
-        
-        Write-Verbose -Message "-+ [LogThis]" -Verbose
-        $this.CreateLogFile(@{Reload = $false})
-        $LogFilePath = ($this.GetCurrentLogFile()).mostRecentLog
-        $lastEntryID = [int]
-
-        $lastLine = $this.GetLastLogEntry()
-        if($lastline){
-            Write-Host "there was a last log entry"
-            $lastEntryID = [int]($lastLine.Split($props.LastDelimeter))[0]
-        }else{
-            Write-Host "Log is currently empty"
-            $lastEntryID = [int]($SeedProps["Seedof"])
-        }
-
-        $lastEntryID = $lastEntryID + $SeedProps["Incrementof"]
-        $myLogEntry = @()
-        $myLogEntry += $lastEntryID
-
-        $myLogEntry += $this.GetHeadingProperties($logThis)
-
-        $myLogEntry = $myLogEntry -join $Delimenter
-        write-host "logging message" -ForegroundColor cyan
-
-        Add-Content -Path $LogFilePath -Value $myLogEntry
-
-        write-host "saving the current delimenter to be used as last delimenter on next run $Delimenter" -ForegroundColor cyan
-        $props.LastDelimeter = $Delimenter
-        $props = $props | ConvertTo-Json
-        Set-Content -Path $config_props.TrackedValuesFile -value $props
+        # is the latest log older than the set offset?
+       $myLatestLogFile =  $this.GetLatestLog()
+       $isOlder = $myLatestLogFile.CreationTime -lt $DateTimeOffset
+       return $isOlder
     }
 }
-$test.ClearAllLogs()
-$test.pad = 4
-$test.UsePadding = $true
-$test.padSymbole = "."
-$test.ResetTrackedValues(@{Reload = $true; UseDefaults = $true})
-$test= [PSLogger]::new()
-
-$test.GetCurrentLogFile(@{Reload = $true})
-$test.GetCurrentLogFile(@{Reload = $false})
-
-
-
-$test.GetTrackedValues(@{Reaload = $false})
-
-#The count is not resettings
-$test.CreateLogFile(@{Reload = $true})
-$test.CreateLogFile(@{Reload = $false})
-
-$test.RetentionPolicy(@{Reload = $true})
-$test.RetentionPolicy(@{Reload = $false}).data.CanCreateNewFile
-
-$test.ValidateConfiguration(
-    $test.GetConfiguration(@{Reload = $true})
-)
-
-$test.ValidateConfiguration(
-    $test.GetConfiguration(@{Reload = $false})
-)
-
-$test.LoadConfiguration()
-$test.LoadTrackedValues()
-$test.Configuration
-$test.LogThis("this is something i want to track with a log entry")
-$test.GetSeedProperties($test.GetConfiguration(@{Reload = $true}))
-
-
-(Get-ChildItem -Path ./Test/Logs).count
-
-$test.GetTrackedValues(@{Reload = $true})
-
-$test.GetTrackedValues(@{Reload = $false})
-
-# when reload = $true then its read from disk
-
-$test.GetConfiguration(@{Reload = $false})
-
-$test.CreateLogFile(@{Reload = $false})
-
-
-$test.GetCurrentLogFile(@{Reload = $true})
-$test.UsePadding
+$PSLogger2 = [PSLogger2]::new()
+$PSLogger2.Initalize(@{
+    MaxLogFileEntries       = 5
+    MaxLogFiles             = 5
+    Delimeter               = ','
+    Extension               = '.csv'
+    LogFilePrefix            = 'test_'
+    LogFolderPath           = './TestLogFolder/'
+    CacheSettingsFolderPath = './CacheFolder'
+    CacheFileName           = '/LoggingCache.txt'
+    ConfigurationLabel       = "LoggingCache"
+})
+$PSLogger2.CheckInterval()
+$PSLogger2.RemoveAllLogs(@{ConfigurationLabel= "LoggingCache"})
+$PSLogger2.GetLogFiles()

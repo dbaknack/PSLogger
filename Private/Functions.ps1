@@ -1,3 +1,7 @@
+
+
+$UtilityTest = [JsonConverter]::new()
+
 Function Update-UDFConfiguration{
     [CmdletBinding()]
     param (

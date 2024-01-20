@@ -1,4 +1,4 @@
-Import-Module "./PSLogger.psd1"
+Import-Module "./PSLogger"
 # at this stage, the module is imported
 $PSLogger = PSLogger -InitializeLog
 $PSLogger.UtilityReloadConfiguration('SeedValue')
