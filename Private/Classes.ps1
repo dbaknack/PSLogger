@@ -1,5 +1,22 @@
 $ErrorActionPreference = 'Stop'
+Function ConvertFrom-Hashtable {
+    [CmdletBinding()]
+    Param([Parameter(Mandatory=$True,ValueFromPipeline=$True,ValueFromPipelinebyPropertyName=$True)]
+        [hashtable]$MyHashtable
+    )
+    PROCESS {
+        $results = @()
 
+        $MyHashtable | ForEach-Object{
+            $result = New-Object psobject;
+            foreach ($key in $_.keys) {
+                $result | Add-Member -MemberType NoteProperty -Name $key -Value $_[$key]
+             }
+             $results += $result;
+         }
+        return $results
+    }
+}
 class JsonConverter {
     [object]ConvertFromJson([object]$Object) {
         if ($Object -is [System.Management.Automation.PSCustomObject]) {

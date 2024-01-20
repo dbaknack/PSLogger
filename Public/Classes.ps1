@@ -583,20 +583,18 @@ class PSLogger{
     [psobject]GetOldestLog(){
         $myLogFiles = $this.GetLogFiles()
         $lastLogFile = $myLogFiles| 
-        Select-Object Name, CreationTime, @{Name='CreationTimeDT'; Expression={[DateTime]::Parse($_.CreationTime)} } | 
+        Select-Object Name, CreationTime, @{Name='CreationTimeDT'; Expression={[DateTime]::Parse($_.CreationTime)} },FullName | 
         Sort-Object CreationTimeDT -Descending | Select-Object -Last 1
         return $lastLogFile
     }
     [psobject]GetLatestLog(){
         $myLogFiles = $this.GetLogFiles()
         $lastLogFile = $myLogFiles| 
-        Select-Object Name, CreationTime, @{Name='CreationTimeDT'; Expression={[DateTime]::Parse($_.CreationTime)} } | 
+        Select-Object Name, CreationTime, @{Name='CreationTimeDT'; Expression={[DateTime]::Parse($_.CreationTime)} },FullName | 
         Sort-Object CreationTimeDT -Descending | Select-Object -First 1
         return $lastLogFile
     }
     [void]RemoveAllLogs([hashtable]$fromSender){
-        # adding the methods params to INPUT_METHOD_PARAMS_TABLE allows you to handle keys are
-        # correctly provided
         $myLogFolder        = $this.Configuration.LogFileProperties.LogsFolderPath
         $myPrefix            = $this.Configuration.LogFileProperties.Prefix
         Get-ChildItem -Path $myLogFolder -Filter "$myPrefix*"  -File | ForEach-Object { Remove-Item $_.FullName -Force }
@@ -612,22 +610,19 @@ class PSLogger{
         $this.Configuration = $myCacheProperties
     }
     [psobject]CheckInterval(){
-        $myCycleLogProperties = $this.Configuration.CycleLogProperites
-        $myInterval = $myCycleLogProperties.EveryInterval
-        $myIntervalValue = $myCycleLogProperties.IntervalValue
+        $METHOD_NAME = "CheckInterval"
+        $myCycleLogProperties   = $this.Configuration.CycleLogProperites
+        $myInterval             = $myCycleLogProperties.EveryInterval
+        $myIntervalValue        = $myCycleLogProperties.IntervalValue
 
+        $msgTemplate01 = "[{0}]:: {1}"
         $DateTimeOffset = switch($myInterval){
-            'hours'{
-                (Get-Date).AddHours(-$myIntervalValue)
-            }
-            'seconds'{
-                (Get-Date).AddSeconds(-$myIntervalValue)
-            }
-            'minutes'{
-                (Get-Date).AddMinutes(-$myIntervalValue)
-            }
-            'days'{
-                (Get-Date).AddDays(-$myIntervalValue)
+            'hours'     { (Get-Date).AddHours(-$myIntervalValue)    }
+            'seconds'   { (Get-Date).AddSeconds(-$myIntervalValue)  }
+            'minutes'   { (Get-Date).AddMinutes(-$myIntervalValue)  }
+            'days'      { (Get-Date).AddDays(-$myIntervalValue)     }
+            default     {
+                ($msgTemplate01 -f $METHOD_NAME,"the interval set '$myInterval' is undefined.")
             }
         }
         # is the latest log older than the set offset?
@@ -635,9 +630,88 @@ class PSLogger{
        $isOlder = $myLatestLogFile.CreationTime -lt $DateTimeOffset
        return $isOlder
     }
+    [psobject]GetLogEntryID(){
+        $myEntryID = $this.Configuration.TotalLogEntries
+        return $myEntryID
+    }
+    [void]LogThis([hashtable]$fromSender){
+        $myConfigurationProperties = $this.UTILITIES.GetUtilitySettingsTable(@{UtilityName = 'Configuration'})
+        $myCache = $myConfigurationProperties.($fromSender.ConfigurationLabel)
+        $myCacheConfiguration = (Get-Content -path $myCache.FilePath) | ConvertFrom-Json
+        #$METHOD_NAME        = "LogThis"
+        $CurrentLogCount    = $this.CheckLogEntryCount()
+        $myLogEntryID       = $this.GetLogEntryID()
+        if($myLogEntryID -gt $myCacheConfiguration.MaxLogFileEntries){
+            $this.CreateLogFile()
+            $myCacheConfiguration.MaxLogFileEntries = 0
+        }
+        $myCurrentLogFile   = $this.GetLatestLog()
+        $myDelimeter        = $myCacheConfiguration.LogFileProperties.Delimeter
+        $definedDelimeter    = '"{0}"' -f $myDelimeter
+        
+        $myHeadingsList = @(
+            $myCacheConfiguration.Headings.column_01
+            $myCacheConfiguration.Headings.column_02
+            $myCacheConfiguration.Headings.column_03
+            $myCacheConfiguration.Headings.column_04
+            $myCacheConfiguration.Headings.column_05
+        )
+
+        $myHeadingsString = [string]
+        if($CurrentLogCount -eq 0){
+            $myHeadingsString = '"{0}"' -f ($myHeadingsString = $myHeadingsList -join $definedDelimeter)
+            Set-Content -path $myCurrentLogFile.FullName -Value $myHeadingsString
+        }
+
+        $myHeadingsTable = @{}
+        foreach($heading in $myHeadingsList){
+            switch($heading){
+                "LogID"{
+                    $myLogEntryID = $myLogEntryID + 1
+                    $myHeadingsTable.Add($heading,$myLogEntryID);break
+                }
+                "UserName"{
+                    $userName = whoami
+                    $myHeadingsTable.Add($heading, $userName);break
+                }
+                "DateTime"{
+                    $dateTime = (Get-Date).ToString($myCacheConfiguration.DateTimeFormat)
+                    $myHeadingsTable.Add($heading,$dateTime);break
+                }
+                "HostName"{
+                    $myHostName = hostname
+                    $myHeadingsTable.Add($heading,$myHostName);break
+                }
+                "Message"{
+                    $myMessage = $fromSender.Message
+                    $myHeadingsTable.Add($heading,$myMessage);break
+                }
+            }
+        }
+
+        $entryList = @()
+        foreach($heading in $myHeadingsList){
+            $entryList += $myHeadingsTable.$heading
+        }
+        $entryString = [string]
+        $entryString = '"{0}"' -f ($entryString = $entryList -join $definedDelimeter)
+        Add-Content -Path $myCurrentLogFile.FullName -Value $entryString
+
+        $myCacheConfiguration.TotalLogEntries = $myLogEntryID
+        $myNewJson = $myCacheConfiguration | ConvertTo-Json
+        Set-Content -path ($myCache.FilePath) -Value $myNewJson
+        $this.Configuration = $myCacheConfiguration
+    }
+    [psobject]CheckLogEntryCount(){
+        $myCurrentLogFile = $this.GetLatestLog()
+        $myLogFileContent = Get-Content -path $myCurrentLogFile.FullName
+        $myLogFileObject = $myLogFileContent | ConvertFrom-Csv
+        return $myLogFileObject.count
+    }
+
 }
-$PSLogger2 = [PSLogger2]::new()
-$PSLogger2.Initalize(@{
+$PSLogger = [PSLogger]::new()
+$PSLogger.Initalize(@{
     MaxLogFileEntries       = 5
     MaxLogFiles             = 5
     Delimeter               = ','
@@ -648,6 +722,16 @@ $PSLogger2.Initalize(@{
     CacheFileName           = '/LoggingCache.txt'
     ConfigurationLabel       = "LoggingCache"
 })
-$PSLogger2.CheckInterval()
-$PSLogger2.RemoveAllLogs(@{ConfigurationLabel= "LoggingCache"})
-$PSLogger2.GetLogFiles()
+
+$PSLogger.LogThis(@{
+    ConfigurationLabel  = "LoggingCache"
+    Message            = "Test"
+})
+
+$PSLogger.Configuration
+
+$PSLogger.CheckLogEntry()
+$PSLogger.CheckInterval()
+$PSLogger.RemoveAllLogs(@{ConfigurationLabel = "LoggingCache"})
+$PSLogger.GetLogFiles()
+$PSLogger.CheckLogEntryCount()

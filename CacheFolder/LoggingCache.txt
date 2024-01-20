@@ -1,28 +1,28 @@
 {
-  "CycleLogProperites": {
-    "EveryInterval": "seconds",
-    "IntervalValue": "24"
-  },
-  "LogFileProperties": {
-    "Prefix": "test_",
-    "LogsFolderPath": "./TestLogFolder/",
-    "Delimeter": ",",
-    "Extension": ".csv"
-  },
-  "TotalLogFiles": 0,
-  "Headings": {
-    "column_05": "Message",
-    "column_01": "LogID",
-    "column_04": "HostName",
-    "column_02": "UserName",
-    "column_03": "DateTime"
-  },
-  "MaxLogFiles": 5,
-  "DateTimeFormat": "yyyy-MM-dd HH:mm:ss.fff",
-  "TotalLogEntries": 0,
+  "TotalLogFiles": 1,
+  "TotalLogEntries": 9,
   "Identity": {
     "seed": 1,
     "increment": 1
   },
-  "MaxLogFileEntries": 5
+  "CycleLogProperites": {
+    "IntervalValue": "24",
+    "EveryInterval": "seconds"
+  },
+  "DateTimeFormat": "yyyy-MM-dd HH:mm:ss.fff",
+  "MaxLogFiles": 5,
+  "MaxLogFileEntries": 0,
+  "Headings": {
+    "column_03": "DateTime",
+    "column_05": "Message",
+    "column_04": "HostName",
+    "column_02": "UserName",
+    "column_01": "LogID"
+  },
+  "LogFileProperties": {
+    "Delimeter": ",",
+    "Extension": ".csv",
+    "LogsFolderPath": "./TestLogFolder/",
+    "Prefix": "test_"
+  }
 }
